@@ -15,13 +15,13 @@
     "mac": {
       "target": "dmg",
       "category": "public.app-category.utilities",
-      "icon": "../assets/logo.png",
-      "dmg": {
-        "background": "../assets/dmg-background.png",
-        "window": {
-          "width": 540,
-          "height": 380
-        }
+      "icon": "../assets/logo.png"
+    },
+    "dmg": {
+      "background": "../assets/dmg-background.png",
+      "window": {
+        "width": 540,
+        "height": 380
       }
     },
     "win": {
