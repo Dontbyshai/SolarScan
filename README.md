@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo.png" alt="SolarScan Logo" width="250" />
+  <img src="solar-scanner/assets/logo.png" alt="SolarScan Logo" width="250" />
   <h1>SolarScan 🛰️☀️</h1>
   <p><strong>Logiciel professionnel de détection de panneaux solaires par imagerie satellite pour la facturation de nettoyage.</strong></p>
 </div>
