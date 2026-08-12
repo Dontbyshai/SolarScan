@@ -15,11 +15,11 @@
     "mac": {
       "target": "dmg",
       "category": "public.app-category.utilities",
-      "icon": "../assets/icon.icns"
+      "icon": "../assets/logo.png"
     },
     "win": {
       "target": "nsis",
-      "icon": "../assets/icon.ico"
+      "icon": "../assets/logo.png"
     },
     "files": [
       "**/*",
