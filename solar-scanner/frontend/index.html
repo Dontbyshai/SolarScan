@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https: http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob: https: http:; connect-src 'self' https: http://127.0.0.1:* http://localhost:*;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Solar Scanner — Détection de Panneaux Solaires</title>
+  <meta name="description" content="Application de détection automatique de panneaux solaires par imagerie satellite IGN pour estimations de nettoyage." />
+
+  <!-- Leaflet CSS (CDN) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+
+  <!-- App Styles -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── Toolbar ──────────────────────────────────────────── -->
+  <header id="toolbar">
+
+    <div class="toolbar-logo">
+      <img src="../assets/logo.png" alt="SolarScan" class="logo-image" />
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <!-- Layer switcher -->
+    <div class="toolbar-group">
+      <span class="toolbar-label">Fond</span>
+      <div class="layer-toggle" role="group" aria-label="Sélection du fond de carte">
+        <button class="layer-btn active" id="btn-osm" aria-pressed="true">🗺 OSM</button>
+        <button class="layer-btn" id="btn-ign" aria-pressed="false">🛰 IGN</button>
+      </div>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <!-- Mode de sélection -->
+    <div class="toolbar-group">
+      <span class="toolbar-label">Action</span>
+      <button class="btn btn-accent" id="btn-scan-view" title="Analyser la vue actuelle (zoom ≥ 17)">
+        🔍 Scanner
+      </button>
+      <button class="btn btn-ghost" id="btn-mode-draw" title="Dessiner une zone à analyser">
+        ✏️ Zone
+      </button>
+      <button class="btn btn-ghost" id="btn-mode-edit" title="Modifier les tracés existants">
+        ✍️ Editer
+      </button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <!-- Actions de dessin (visible en mode manuel) -->
+    <div class="toolbar-group" id="draw-controls" style="display:none">
+      <button class="btn btn-ghost btn-icon" id="btn-draw-rect" title="Dessiner un rectangle">⬜</button>
+      <button class="btn btn-ghost btn-icon" id="btn-draw-poly" title="Dessiner un polygone">⬡</button>
+      <button class="btn btn-ghost btn-icon btn-danger" id="btn-draw-clear" title="Effacer les zones">🗑</button>
+      <div class="toolbar-divider"></div>
+      <button class="btn btn-accent" id="btn-analyze-zone" disabled>
+        ✅ Ajouter comme panneau
+      </button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <!-- Recherche d'adresse -->
+    <div class="toolbar-group">
+      <div class="search-container">
+        <input type="text" id="search-input" placeholder="Rechercher une adresse..." autocomplete="off" />
+        <button id="btn-search" title="Rechercher">🔍</button>
+      </div>
+    </div>
+
+    <div class="toolbar-spacer"></div>
+
+    <!-- Contrôles de vue carte -->
+    <div class="toolbar-group">
+      <button class="btn btn-ghost btn-icon" id="btn-zoom-in" title="Zoom avant">＋</button>
+      <button class="btn btn-ghost btn-icon" id="btn-zoom-out" title="Zoom arrière">－</button>
+      <button class="btn btn-ghost btn-icon" id="btn-locate" title="Aller à ma position">◎</button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <!-- Settings -->
+    <div class="toolbar-group">
+      <button class="btn btn-ghost btn-icon" id="btn-settings" title="Paramètres de facturation">⚙</button>
+      <button class="btn btn-ghost btn-icon" id="btn-sidebar-toggle" title="Afficher/masquer le panneau">◧</button>
+    </div>
+
+    <!-- Backend status -->
+    <div id="backend-status" title="Statut du moteur IA">
+      <div class="status-dot connecting" id="status-dot"></div>
+      <span class="status-text" id="status-text">Démarrage…</span>
+    </div>
+
+  </header>
+
+  <!-- ── Main Area ─────────────────────────────────────────── -->
+  <div id="main-area">
+
+    <!-- Map -->
+    <div id="map" role="main" aria-label="Carte satellite interactive"></div>
+
+    <!-- Zoom badge -->
+    <div id="zoom-badge" aria-live="polite">
+      <span class="zoom-label">ZOOM</span>
+      <span class="zoom-value" id="zoom-value">13</span>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading-overlay" role="status" aria-label="Analyse en cours">
+      <div class="loading-spinner"></div>
+      <div class="loading-text" id="loading-text">Analyse IA en cours…</div>
+      <div class="loading-sub" id="loading-sub">Téléchargement des tuiles IGN</div>
+    </div>
+
+    <!-- Progress bar (mode manuel) -->
+    <div id="progress-bar-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="progress-label">
+        <span id="progress-text">Téléchargement des tuiles…</span>
+        <span id="progress-pct">0%</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" aria-label="Résultats de détection">
+
+      <div class="sidebar-header">
+        <div class="sidebar-title">Résultats</div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Panneaux détectés</div>
+            <div class="stat-value" id="stat-count">0</div>
+          </div>
+          <div class="stat-card accent">
+            <div class="stat-label">Surface totale</div>
+            <div class="stat-value" id="stat-area">0<span class="stat-unit">m²</span></div>
+          </div>
+          <div class="stat-card" style="grid-column: 1 / -1;">
+            <div class="stat-label">Estimation nettoyage HT</div>
+            <div class="stat-value" id="stat-price">0<span class="stat-unit">€</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detection items list -->
+      <div class="detection-list" id="detection-list">
+        <div class="empty-state">
+          <div class="empty-icon">🛰</div>
+          <div class="empty-title">Aucune détection</div>
+          <div class="empty-desc">Activez le mode Auto (zoom ≥ 17 sur IGN) ou dessinez une zone avec le mode Zone.</div>
+        </div>
+      </div>
+
+      <!-- Export footer -->
+      <div class="sidebar-footer">
+        <div class="export-row">
+          <button class="btn btn-ghost" id="btn-export-geojson" disabled>
+            📍 GeoJSON
+          </button>
+          <button class="btn btn-ghost" id="btn-export-csv" disabled>
+            📊 CSV
+          </button>
+          <button class="btn btn-ghost" id="btn-export-pdf" disabled>
+            📄 PDF
+          </button>
+        </div>
+        <button class="btn btn-danger" id="btn-clear-results" style="width:100%; justify-content:center;" disabled>
+          🗑 Effacer les résultats
+        </button>
+      </div>
+
+    </aside>
+
+  </div><!-- /main-area -->
+
+</div><!-- /app -->
+
+<!-- ── Modals & Overlays ─────────────────────────────────── -->
+
+  <!-- Settings Modal -->
+  <div id="settings-panel" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="width: 500px; max-width: 95vw;">
+      <h3>Paramètres de l'application</h3>
+      <p style="margin-bottom: 24px; font-size: 12px; color: #666;">
+        Configurez les informations de votre entreprise pour la génération des devis et ajustez les paramètres de l'IA.
+      </p>
+
+      <div style="display: flex; gap: 24px;">
+        <!-- Colonne Gauche: Société -->
+        <div style="flex: 1;">
+          <h4 style="margin-top: 0; margin-bottom: 12px; font-size: 13px; color: #333; text-transform: uppercase;">Société</h4>
+          <div class="setting-row">
+            <label for="setting-company-name">Nom de l'entreprise</label>
+            <input type="text" id="setting-company-name" placeholder="Ex: SolarClean Pro" />
+          </div>
+          <div class="setting-row">
+            <label for="setting-company-address">Adresse</label>
+            <input type="text" id="setting-company-address" placeholder="123 rue de l'Énergie, 75000 Paris" />
+          </div>
+          <div class="setting-row">
+            <label for="setting-company-siret">SIRET / TVA</label>
+            <input type="text" id="setting-company-siret" placeholder="SIRET 123 456 789 00010" />
+          </div>
+          <div class="setting-row">
+            <label>Logo de l'entreprise</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="file" id="setting-company-logo-file" accept="image/png, image/jpeg, image/webp" style="display: none;" />
+              <button class="btn btn-ghost" id="btn-upload-logo" style="padding: 6px 10px;">Importer une image</button>
+              <img id="logo-preview" style="height: 32px; max-width: 100px; object-fit: contain; display: none; border-radius: 4px; border: 1px solid #e4e4e7;" />
+              <input type="hidden" id="setting-company-logo" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Colonne Droite: Tarifs -->
+        <div style="flex: 1;">
+          <h4 style="margin-top: 0; margin-bottom: 12px; font-size: 13px; color: #333; text-transform: uppercase;">Tarification par paliers (HT)</h4>
+          
+          <div class="setting-row" style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 12px; color: #52525b; width: 50px;">Jusqu'à</span>
+            <input type="number" id="tier1-max" value="100" style="width: 70px; padding: 6px;" />
+            <span style="font-size: 12px; color: #52525b;">m² :</span>
+            <input type="number" id="tier1-price" value="3.5" step="0.1" style="width: 70px; padding: 6px;" />
+            <span style="font-size: 12px; color: #52525b;">€/m²</span>
+          </div>
+
+          <div class="setting-row" style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 12px; color: #52525b; width: 50px;">Jusqu'à</span>
+            <input type="number" id="tier2-max" value="300" style="width: 70px; padding: 6px;" />
+            <span style="font-size: 12px; color: #52525b;">m² :</span>
+            <input type="number" id="tier2-price" value="3.0" step="0.1" style="width: 70px; padding: 6px;" />
+            <span style="font-size: 12px; color: #52525b;">€/m²</span>
+          </div>
+
+          <div class="setting-row" style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 12px; color: #52525b; width: 50px;">Jusqu'à</span>
+            <input type="number" id="tier3-max" value="500" style="width: 70px; padding: 6px;" />
+            <span style="font-size: 12px; color: #52525b;">m² :</span>
+            <input type="number" id="tier3-price" value="2.5" step="0.1" style="width: 70px; padding: 6px;" />
+            <span style="font-size: 12px; color: #52525b;">€/m²</span>
+          </div>
+
+          <div class="setting-row" style="margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 12px; color: #52525b; width: 50px;">Au-delà</span>
+            <span style="width: 70px; text-align: center; color: #a1a1aa;">-</span>
+            <span style="font-size: 12px; color: #52525b;">m² :</span>
+            <input type="number" id="tier4-price" value="2.0" step="0.1" style="width: 70px; padding: 6px;" />
+            <span style="font-size: 12px; color: #52525b;">€/m²</span>
+          </div>
+          
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px;">
+            <div class="setting-row" style="margin-bottom: 0;">
+              <label for="setting-vat">TVA (%)</label>
+              <input type="number" id="setting-vat" step="0.1" value="20" style="padding: 8px;" />
+            </div>
+            <div class="setting-row" style="margin-bottom: 0;">
+              <label for="setting-time">Temps (min/m²)</label>
+              <input type="number" id="setting-time" step="0.1" value="2" style="padding: 8px;" />
+            </div>
+            <div class="setting-row" style="margin-bottom: 0;">
+              <label for="setting-max-tiles">Tuiles (Auto)</label>
+              <input type="number" id="setting-max-tiles" min="1" max="50" value="20" style="padding: 8px;" />
+            </div>
+          </div>
+          
+          <div>
+            <button class="btn btn-ghost" id="btn-clear-cache" style="width:100%; border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; justify-content: center; font-weight: 500;">Vider le cache IA</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top: 24px;">
+        <button class="btn btn-ghost" id="btn-close-settings">Fermer</button>
+        <button class="btn btn-accent" id="btn-save-settings">Enregistrer les paramètres</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Client Info Modal -->
+  <div id="client-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <h3>Informations du Client</h3>
+      <p style="margin-bottom: 16px; font-size: 12px; color: #666;">
+        Ces informations apparaîtront sur le devis PDF généré, avec une photo annotée de la carte.
+      </p>
+      <div class="setting-row">
+        <label for="client-name">Nom du client / Entreprise</label>
+        <input type="text" id="client-name" placeholder="Ex: M. Dupont ou Gaec de la Ferme" />
+      </div>
+      <div class="setting-row">
+        <label for="client-address">Adresse du client</label>
+        <input type="text" id="client-address" placeholder="Lieu-dit, 12345 Ville" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="btn-client-cancel">Annuler</button>
+        <button class="btn btn-accent" id="btn-client-confirm">Générer le PDF 📄</button>
+      </div>
+    </div>
+  </div>
+
+<!-- ── Toast Container ─────────────────────────────────────── -->
+<div id="toast-container" aria-live="polite"></div>
+
+<!-- ── Scripts ──────────────────────────────────────────────── -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script src="geo_utils.js"></script>
+<script src="sidebar.js"></script>
+<script src="draw.js"></script>
+<script src="map.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# Node
+node_modules/
+dist/
+build/
+.npm-local/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+.venv/
+build/
+dist/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App Assets
+solar-scanner/assets/cache/
+solar-scanner/assets/model/
+solar-scanner/backend/dist/
+solar-scanner/electron/dist/

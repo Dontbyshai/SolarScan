@@ -1,0 +1,51 @@
+{
+  "name": "solar-scanner",
+  "version": "1.0.0",
+  "description": "Détecteur de panneaux solaires par imagerie satellite IGN",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win"
+  },
+  "build": {
+    "appId": "fr.solarscanner.app",
+    "productName": "Solar Scanner",
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.utilities",
+      "icon": "../assets/icon.icns"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "../assets/icon.ico"
+    },
+    "files": [
+      "**/*",
+      "../frontend/**/*",
+      "../assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../assets",
+        "to": "assets"
+      },
+      {
+        "from": "../backend/dist",
+        "to": "backend",
+        "filter": ["**/*"]
+      }
+    ]
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "leaflet-draw": "^1.0.4"
+  },
+  "devDependencies": {
+    "electron": "^29.1.0",
+    "electron-builder": "^24.13.3"
+  },
+  "author": "Solar Scanner",
+  "license": "MIT"
+}
