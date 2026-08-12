@@ -93,5 +93,5 @@ npm start
 ---
 
 <div align="center">
-  <p>© 2024 SolarScan — Développé pour la rentabilité et l'élégance.</p>
+  <p>© 2024 SolarScan — Développé avec ❤️ par dontbyshai</p>
 </div>
