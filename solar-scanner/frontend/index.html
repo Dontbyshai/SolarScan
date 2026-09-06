@@ -15,6 +15,37 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+<!-- DEBUG ERROR HANDLER -->
+<script>
+  window.addEventListener('error', function(e) {
+    const errDiv = document.createElement('div');
+    errDiv.style.position = 'fixed';
+    errDiv.style.top = '0';
+    errDiv.style.left = '0';
+    errDiv.style.right = '0';
+    errDiv.style.background = 'red';
+    errDiv.style.color = 'white';
+    errDiv.style.zIndex = '999999';
+    errDiv.style.padding = '10px';
+    errDiv.style.fontFamily = 'monospace';
+    errDiv.innerHTML = '<b>JS ERROR:</b> ' + e.message + '<br>Line: ' + e.lineno + '<br>File: ' + e.filename;
+    document.body.appendChild(errDiv);
+  });
+  window.addEventListener('unhandledrejection', function(e) {
+    const errDiv = document.createElement('div');
+    errDiv.style.position = 'fixed';
+    errDiv.style.top = '50px';
+    errDiv.style.left = '0';
+    errDiv.style.right = '0';
+    errDiv.style.background = 'orange';
+    errDiv.style.color = 'black';
+    errDiv.style.zIndex = '999999';
+    errDiv.style.padding = '10px';
+    errDiv.style.fontFamily = 'monospace';
+    errDiv.innerHTML = '<b>PROMISE ERROR:</b> ' + (e.reason ? e.reason.message : 'Unknown');
+    document.body.appendChild(errDiv);
+  });
+</script>
 
 <div id="app">
 
@@ -38,17 +69,27 @@
 
     <div class="toolbar-divider"></div>
 
+    <!-- Extra Layers -->
+    <div class="toolbar-group">
+      <span class="toolbar-label">Calques</span>
+      <div class="layer-toggle" role="group" aria-label="Sélection des calques">
+        <button class="layer-btn" id="btn-meteo" aria-pressed="false">🌧 Météo</button>
+      </div>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
     <!-- Mode de sélection -->
     <div class="toolbar-group">
       <span class="toolbar-label">Action</span>
       <button class="btn btn-accent" id="btn-scan-view" title="Analyser la vue actuelle (zoom ≥ 17)">
         🔍 Scanner
       </button>
-      <button class="btn btn-ghost" id="btn-mode-draw" title="Dessiner une zone à analyser">
-        ✏️ Zone
+      <button class="btn btn-ghost" id="btn-mode-draw" title="Dessiner manuellement un panneau">
+        ✏️ Créer
       </button>
       <button class="btn btn-ghost" id="btn-mode-edit" title="Modifier les tracés existants">
-        ✍️ Editer
+        ✍️ Éditer
       </button>
     </div>
 
@@ -61,7 +102,7 @@
       <button class="btn btn-ghost btn-icon btn-danger" id="btn-draw-clear" title="Effacer les zones">🗑</button>
       <div class="toolbar-divider"></div>
       <button class="btn btn-accent" id="btn-analyze-zone" disabled>
-        ✅ Ajouter comme panneau
+        ✅ Ajouter manuellement
       </button>
     </div>
 
@@ -160,19 +201,40 @@
         </div>
       </div>
 
+      <!-- Business Options -->
+      <div id="business-options-container" class="business-options-container">
+        <!-- Rendered via JS -->
+      </div>
+      
+      <!-- Tournée Header -->
+      <div style="padding: 10px 15px; border-bottom: 1px solid var(--border-light); background: var(--surface); display: flex; gap: 8px;">
+        <button class="btn btn-ghost" id="btn-add-tournee-quick" title="Ajouter le scan actuel à la tournée" style="padding: 0 12px; border: 1px solid var(--accent); color: var(--accent);">
+          ➕
+        </button>
+        <button class="btn btn-accent" id="btn-open-tournee" style="flex: 1; justify-content: center;">
+          🚗 Ma Tournée (0)
+        </button>
+      </div>
+
       <!-- Export footer -->
       <div class="sidebar-footer">
-        <div class="export-row">
-          <button class="btn btn-ghost" id="btn-export-geojson" disabled>
-            📍 GeoJSON
+        <div class="export-row" style="margin-bottom: 8px;">
+          <button class="btn btn-ghost" id="btn-save-project" title="Sauvegarder le projet (.solar)">
+            💾
           </button>
-          <button class="btn btn-ghost" id="btn-export-csv" disabled>
+          <button class="btn btn-ghost" id="btn-open-project" title="Ouvrir un projet (.solar)">
+            📂
+          </button>
+          <button class="btn btn-ghost" id="btn-manage-options">
+            ⚙️ Options
+          </button>
+          <button class="btn btn-ghost" id="btn-export-csv" disabled title="Exporter en CSV">
             📊 CSV
           </button>
-          <button class="btn btn-ghost" id="btn-export-pdf" disabled>
-            📄 PDF
-          </button>
         </div>
+        <button class="btn btn-accent" id="btn-export-pdf" style="width:100%; justify-content:center; margin-bottom: 8px;" disabled>
+          📄 Générer Facture
+        </button>
         <button class="btn btn-danger" id="btn-clear-results" style="width:100%; justify-content:center;" disabled>
           🗑 Effacer les résultats
         </button>
@@ -188,7 +250,7 @@
 
   <!-- Settings Modal -->
   <div id="settings-panel" class="modal-overlay" style="display: none;">
-    <div class="modal-content" style="width: 500px; max-width: 95vw;">
+    <div class="modal-content" style="width: 650px; max-width: 95vw;">
       <h3>Paramètres de l'application</h3>
       <p style="margin-bottom: 24px; font-size: 12px; color: #666;">
         Configurez les informations de votre entreprise pour la génération des devis et ajustez les paramètres de l'IA.
@@ -228,33 +290,33 @@
           <div class="setting-row" style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 12px; color: #52525b; width: 50px;">Jusqu'à</span>
             <input type="number" id="tier1-max" value="100" style="width: 70px; padding: 6px;" />
-            <span style="font-size: 12px; color: #52525b;">m² :</span>
+            <span style="font-size: 12px; color: #52525b; white-space: nowrap;">m² :</span>
             <input type="number" id="tier1-price" value="3.5" step="0.1" style="width: 70px; padding: 6px;" />
-            <span style="font-size: 12px; color: #52525b;">€/m²</span>
+            <span style="font-size: 12px; color: #52525b; white-space: nowrap;">€/m²</span>
           </div>
 
           <div class="setting-row" style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 12px; color: #52525b; width: 50px;">Jusqu'à</span>
             <input type="number" id="tier2-max" value="300" style="width: 70px; padding: 6px;" />
-            <span style="font-size: 12px; color: #52525b;">m² :</span>
+            <span style="font-size: 12px; color: #52525b; white-space: nowrap;">m² :</span>
             <input type="number" id="tier2-price" value="3.0" step="0.1" style="width: 70px; padding: 6px;" />
-            <span style="font-size: 12px; color: #52525b;">€/m²</span>
+            <span style="font-size: 12px; color: #52525b; white-space: nowrap;">€/m²</span>
           </div>
 
           <div class="setting-row" style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 12px; color: #52525b; width: 50px;">Jusqu'à</span>
             <input type="number" id="tier3-max" value="500" style="width: 70px; padding: 6px;" />
-            <span style="font-size: 12px; color: #52525b;">m² :</span>
+            <span style="font-size: 12px; color: #52525b; white-space: nowrap;">m² :</span>
             <input type="number" id="tier3-price" value="2.5" step="0.1" style="width: 70px; padding: 6px;" />
-            <span style="font-size: 12px; color: #52525b;">€/m²</span>
+            <span style="font-size: 12px; color: #52525b; white-space: nowrap;">€/m²</span>
           </div>
 
           <div class="setting-row" style="margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 12px; color: #52525b; width: 50px;">Au-delà</span>
             <span style="width: 70px; text-align: center; color: #a1a1aa;">-</span>
-            <span style="font-size: 12px; color: #52525b;">m² :</span>
+            <span style="font-size: 12px; color: #52525b; white-space: nowrap;">m² :</span>
             <input type="number" id="tier4-price" value="2.0" step="0.1" style="width: 70px; padding: 6px;" />
-            <span style="font-size: 12px; color: #52525b;">€/m²</span>
+            <span style="font-size: 12px; color: #52525b; white-space: nowrap;">€/m²</span>
           </div>
           
           <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px;">
@@ -269,6 +331,25 @@
             <div class="setting-row" style="margin-bottom: 0;">
               <label for="setting-max-tiles">Tuiles (Auto)</label>
               <input type="number" id="setting-max-tiles" min="1" max="50" value="20" style="padding: 8px;" />
+            </div>
+          </div>
+          <h4 style="margin-top: 16px; margin-bottom: 12px; font-size: 13px; color: #333; text-transform: uppercase;">Rentabilité & Déplacement</h4>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;">
+            <div class="setting-row" style="margin-bottom: 0;">
+              <label for="setting-roi-prod">Prod. (kWh)</label>
+              <input type="number" id="setting-roi-prod" step="10" value="200" style="padding: 8px;" title="Production moyenne par an par m²" />
+            </div>
+            <div class="setting-row" style="margin-bottom: 0;">
+              <label for="setting-roi-price">Prix kWh (€)</label>
+              <input type="number" id="setting-roi-price" step="0.01" value="0.25" style="padding: 8px;" />
+            </div>
+            <div class="setting-row" style="margin-bottom: 0;">
+              <label for="setting-roi-loss">Perte (%)</label>
+              <input type="number" id="setting-roi-loss" min="1" max="100" value="15" style="padding: 8px;" />
+            </div>
+            <div class="setting-row" style="margin-bottom: 0;">
+              <label for="setting-mileage-cost">Frais (€/km)</label>
+              <input type="number" id="setting-mileage-cost" step="0.05" value="0.5" style="padding: 8px;" />
             </div>
           </div>
           
@@ -287,7 +368,7 @@
 
   <!-- Client Info Modal -->
   <div id="client-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-content">
+    <div class="modal-content" style="width: 580px; max-width: 95vw;">
       <h3>Informations du Client</h3>
       <p style="margin-bottom: 16px; font-size: 12px; color: #666;">
         Ces informations apparaîtront sur le devis PDF généré, avec une photo annotée de la carte.
@@ -307,6 +388,146 @@
     </div>
   </div>
 
+  <!-- Tournée Add Modal -->
+  <div id="tournee-add-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="width: 500px; max-width: 95vw;">
+      <h3>Ajouter à la tournée</h3>
+      <p style="margin-bottom: 16px; font-size: 12px; color: #666;">
+        Saisissez les informations de ce client pour l'ajouter à votre itinéraire de la journée.
+      </p>
+      <div class="setting-row">
+        <label for="tournee-add-name">Nom du client / Entreprise</label>
+        <input type="text" id="tournee-add-name" placeholder="Ex: M. Dupont" />
+      </div>
+      <div class="setting-row">
+        <label for="tournee-add-address">Adresse du client</label>
+        <input type="text" id="tournee-add-address" placeholder="Recherche de l'adresse en cours..." />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="btn-tournee-add-cancel" style="margin-right: auto;">Annuler</button>
+        <button class="btn btn-accent" id="btn-tournee-add-confirm">Ajouter 📍</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tournée Edit Modal -->
+  <div id="tournee-edit-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="width: 500px; max-width: 95vw;">
+      <h3>Modifier le client</h3>
+      <div class="setting-row">
+        <label for="tournee-edit-name">Nom du client / Entreprise</label>
+        <input type="text" id="tournee-edit-name" />
+      </div>
+      <div class="setting-row">
+        <label for="tournee-edit-address">Adresse du client</label>
+        <input type="text" id="tournee-edit-address" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="btn-tournee-edit-cancel" style="margin-right: auto;">Annuler</button>
+        <button class="btn btn-accent" id="btn-tournee-edit-confirm">Enregistrer 💾</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Options Modal -->
+  <div id="options-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="width: 600px; max-width: 95vw;">
+      <h3>Options d'intervention (Devis)</h3>
+      <p style="margin-bottom: 16px; font-size: 12px; color: #666;">
+        Créez ou modifiez les options qui pourront être cochées pour impacter le prix total du devis.
+      </p>
+      
+      <div class="options-table-container">
+        <table class="options-table" id="options-table">
+          <thead>
+            <tr>
+              <th>Nom de l'option</th>
+              <th>Type de calcul</th>
+              <th>Valeur</th>
+              <th style="width: 40px;"></th>
+            </tr>
+          </thead>
+          <tbody id="options-tbody">
+            <!-- Rendered by JS -->
+          </tbody>
+        </table>
+      </div>
+      
+      <div style="margin-top: 12px;">
+        <button class="btn btn-ghost btn-small" id="btn-add-option">+ Ajouter une option</button>
+      </div>
+
+      <div class="modal-actions" style="margin-top: 24px;">
+        <button class="btn btn-ghost" id="btn-options-cancel">Annuler</button>
+        <button class="btn btn-accent" id="btn-options-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tournée Modal -->
+  <div id="tournee-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="width: 650px; max-width: 95vw;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+        <div>
+          <h3 style="margin: 0 0 5px 0;">🚗 Optimisation de Tournée</h3>
+          <p style="margin: 0; font-size: 12px; color: #666;">
+            Générez l'itinéraire le plus court pour relier vos différents clients.
+          </p>
+        </div>
+        <button class="btn btn-ghost btn-small" id="btn-clear-tournee" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3);">
+          🗑️ Vider
+        </button>
+      </div>
+      
+      <div class="options-table-container" style="margin-bottom: 20px;">
+        <table class="options-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Client</th>
+              <th>Adresse</th>
+              <th style="text-align: right;">Prix HT</th>
+            </tr>
+          </thead>
+          <tbody id="tournee-tbody">
+            <!-- Rendered by JS -->
+          </tbody>
+        </table>
+      </div>
+      
+      <div id="tournee-results" style="display: none; background: #f0faf8; border: 1px solid #00b894; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+        <h4 style="margin: 0 0 10px 0; color: #00b894; font-size: 14px;">Bilan de la tournée</h4>
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 13px; margin-bottom: 10px;">
+          <div><strong>Distance :</strong> <span id="tournee-distance">0</span> km</div>
+          <div><strong>Temps de route :</strong> <span id="tournee-time">0</span> min</div>
+          <div><strong>CA Nettoyage :</strong> <span id="tournee-revenue">0</span> € HT</div>
+          <div><strong>Frais de déplacement :</strong> <span id="tournee-mileage-cost">0</span> € HT</div>
+        </div>
+        <div style="border-top: 1px dashed rgba(0,184,148,0.3); padding-top: 10px; font-size: 14px;">
+          <strong>Total estimé à facturer : <span id="tournee-total-final" style="color: #00b894; font-size: 16px;">0</span> € HT</strong>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="btn-close-tournee">Fermer</button>
+        <button class="btn btn-ghost" id="btn-gmaps-tournee" style="display: none; border-color: #4285F4; color: #4285F4;" onclick="window.open(this.dataset.url, '_blank')">Ouvrir dans Google Maps 🗺️</button>
+        <button class="btn btn-accent" id="btn-calc-tournee">Calculer l'itinéraire 🗺️</button>
+      </div>
+  <!-- Street View Modal -->
+  <div class="modal-overlay" id="sv-modal" style="display: none; align-items: center; justify-content: center; z-index: 10000; padding: 20px;">
+    <div style="background: white; border-radius: 8px; width: 100%; height: 100%; max-width: 1200px; max-height: 800px; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.5); overflow: hidden;">
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+        <h3 style="margin: 0; font-size: 16px; color: #334155; display: flex; align-items: center; gap: 8px;">
+          <span>👁️</span> Street View
+        </h3>
+        <button id="btn-close-sv" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #64748b; line-height: 1;">&times;</button>
+      </div>
+      <div style="flex: 1; background: #e2e8f0; position: relative;">
+        <iframe id="sv-iframe" style="width: 100%; height: 100%; border: none;" allowfullscreen></iframe>
+      </div>
+    </div>
+  </div>
+
 <!-- ── Toast Container ─────────────────────────────────────── -->
 <div id="toast-container" aria-live="polite"></div>
 
@@ -314,6 +535,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 <script src="geo_utils.js"></script>
+<script src="pdfTemplate.js"></script>
 <script src="sidebar.js"></script>
 <script src="draw.js"></script>
 <script src="map.js"></script>

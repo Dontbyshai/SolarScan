@@ -12,9 +12,12 @@ Endpoints :
 
 import json
 import logging
+import os
+import signal
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
+import aiohttp
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -196,6 +199,43 @@ async def cache_info():
 async def cache_clear():
     count = clear_tile_cache()
     return {"ok": True, "cleared": count}
+
+
+@app.post("/shutdown")
+async def shutdown():
+    logger.info("Shutdown requested via API")
+    os.kill(os.getpid(), signal.SIGTERM)
+    return {"ok": True, "message": "Shutting down"}
+
+
+# ── Geocoding (Nominatim Proxy) ───────────────────────────────────────────────
+
+GEO_CACHE = {}
+
+@app.get("/geocode/search")
+async def geocode_search(q: str):
+    if q in GEO_CACHE:
+        return GEO_CACHE[q]
+    headers = {"User-Agent": "SolarScan-App/1.0 (contact@solarscan.com)", "Accept-Language": "fr"}
+    async with aiohttp.ClientSession() as session:
+        url = f"https://nominatim.openstreetmap.org/search?format=json&q={q}&limit=1"
+        async with session.get(url, headers=headers) as resp:
+            data = await resp.json()
+            GEO_CACHE[q] = data
+            return data
+
+@app.get("/geocode/reverse")
+async def geocode_reverse(lat: float, lon: float):
+    key = f"{lat},{lon}"
+    if key in GEO_CACHE:
+        return GEO_CACHE[key]
+    headers = {"User-Agent": "SolarScan-App/1.0 (contact@solarscan.com)", "Accept-Language": "fr"}
+    async with aiohttp.ClientSession() as session:
+        url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=18&addressdetails=1"
+        async with session.get(url, headers=headers) as resp:
+            data = await resp.json()
+            GEO_CACHE[key] = data
+            return data
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
