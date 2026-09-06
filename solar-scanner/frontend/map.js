@@ -38,6 +38,7 @@ window.MapController = (() => {
   const $zoomValue        = document.getElementById('zoom-value');
   const $btnOSM           = document.getElementById('btn-osm');
   const $btnIGN           = document.getElementById('btn-ign');
+  const $btnMeteo         = document.getElementById('btn-meteo');
   const $btnScanView      = document.getElementById('btn-scan-view');
   const $btnZoomIn        = document.getElementById('btn-zoom-in');
   const $btnZoomOut       = document.getElementById('btn-zoom-out');
@@ -100,6 +101,13 @@ window.MapController = (() => {
     _map.on('zoomend moveend', () => {
       _updateZoomBadge();
     });
+    
+    // Street View on map right-click
+    _map.on('contextmenu', (e) => {
+      if (e.latlng) {
+        _openStreetViewModal(e.latlng.lat, e.latlng.lng);
+      }
+    });
 
     _map.on(L.Draw.Event.EDITED, (e) => {
       e.layers.eachLayer(layer => {
@@ -125,7 +133,6 @@ window.MapController = (() => {
       });
       Sidebar.setDetections(_detections); // Mettre à jour l'interface
       Toast.show('Modifications enregistrées', 'success');
-      _toggleEditMode(false);
     });
 
     if ($btnModeEdit) {
@@ -150,6 +157,11 @@ window.MapController = (() => {
     // Layer switching
     $btnOSM.addEventListener('click', () => _switchLayer('osm'));
     $btnIGN.addEventListener('click', () => _switchLayer('ign'));
+    
+    if ($btnMeteo) {
+      $btnMeteo.addEventListener('click', _toggleMeteo);
+    }
+    
     $btnScanView.addEventListener('click', _analyzeCurrentView);
 
     // Zoom controls
@@ -166,9 +178,7 @@ window.MapController = (() => {
       if (!query) return;
       $btnSearch.textContent = '⏳';
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`, {
-          headers: { 'Accept-Language': 'fr' }
-        });
+        const res = await fetch(`${BACKEND_URL}/geocode/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
         if (data && data.length > 0) {
           const result = data[0];
@@ -218,6 +228,66 @@ window.MapController = (() => {
     $btnIGN.classList.toggle('active', name === 'ign');
   }
 
+  let _meteoLayer = null;
+  let _meteoActive = false;
+  
+  async function _toggleMeteo() {
+    _meteoActive = !_meteoActive;
+    if ($btnMeteo) {
+      $btnMeteo.classList.toggle('active', _meteoActive);
+      $btnMeteo.setAttribute('aria-pressed', _meteoActive.toString());
+    }
+
+    if (_meteoActive) {
+      if (window.Toast) window.Toast.show("Chargement du radar météo...", "info");
+      try {
+        const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+        const data = await res.json();
+        const past = data.radar.past;
+        const latest = past[past.length - 1]; 
+        
+        if (_meteoLayer) _map.removeLayer(_meteoLayer);
+        
+        _meteoLayer = L.tileLayer(`https://tilecache.rainviewer.com${latest.path}/256/{z}/{x}/{y}/2/1_1.png`, {
+          opacity: 0.6,
+          attribution: 'Weather data © RainViewer',
+          maxNativeZoom: 18,
+          maxZoom: 22,
+          zIndex: 10
+        });
+        _meteoLayer.addTo(_map);
+      } catch (err) {
+        console.error("Meteo err:", err);
+        if (window.Toast) window.Toast.show("Erreur lors du chargement de la météo", "error");
+        _meteoActive = false;
+        if ($btnMeteo) $btnMeteo.classList.remove('active');
+      }
+    } else {
+      if (_meteoLayer) {
+        _map.removeLayer(_meteoLayer);
+      }
+    }
+  }
+
+  // ── Street View Modal ───────────────────────────────────────
+  const $svModal = document.getElementById('sv-modal');
+  const $svIframe = document.getElementById('sv-iframe');
+  const $btnCloseSv = document.getElementById('btn-close-sv');
+
+  if ($btnCloseSv) {
+    $btnCloseSv.addEventListener('click', () => {
+      if ($svModal) $svModal.style.display = 'none';
+      if ($svIframe) $svIframe.src = '';
+    });
+  }
+
+  function _openStreetViewModal(lat, lng) {
+    if (!$svModal || !$svIframe) return;
+    const url = `https://maps.google.com/maps?q=&layer=c&cbll=${lat},${lng}&output=svembed`;
+    $svIframe.src = url;
+    $svModal.style.display = 'flex';
+  }
+
   // ── Zoom badge ────────────────────────────────────────────
   function _updateZoomBadge() {
     const z = _map.getZoom();
@@ -229,8 +299,6 @@ window.MapController = (() => {
 
   // ── Get visible tiles ─────────────────────────────────────
   function _getVisibleTiles(zoom) {
-    const settings = Sidebar.getSettings();
-    const maxTiles = settings.max_tiles_auto || 20;
     const bounds = _map.getBounds();
 
     const georgraphicBounds = {
@@ -242,11 +310,12 @@ window.MapController = (() => {
 
     let tiles = GeoUtils.tilesInBounds(georgraphicBounds, zoom);
 
-    if (tiles.length > maxTiles) {
-      // Take center tiles
+    // Sécurité pour éviter de planter le backend si l'écran est gigantesque
+    if (tiles.length > 150) {
+      if (window.Toast) window.Toast.show('Zone très vaste, analyse partielle. Zoomez davantage.', 'warning');
+      // Garder les tuiles centrales (méthode simple)
       const mid = Math.floor(tiles.length / 2);
-      const half = Math.floor(maxTiles / 2);
-      tiles = tiles.slice(Math.max(0, mid - half), mid + half);
+      tiles = tiles.slice(Math.max(0, mid - 75), mid + 75);
     }
 
     return tiles.map((t) => ({
@@ -349,11 +418,9 @@ window.MapController = (() => {
       center: { lat: center.lat, lng: center.lng }
     };
 
-    // Add to _detections
-    _detections.push(detection);
-    
-    // Redessiner toutes les détections en utilisant displayDetections
-    displayDetections(_detections); // Re-render the map and sidebar
+    // displayDetections automatically adds to _detections array and triggers re-render
+    displayDetections([detection]);
+
     
     DrawController.clearDrawings();
     DrawController.setMode('normal');
@@ -398,7 +465,7 @@ window.MapController = (() => {
   // ── Display detection polygons ────────────────────────────
   function displayDetections(detections) {
     _detections = [..._detections, ...detections];
-    _renderPolygons(detections);
+    _renderPolygons();
     Sidebar.setDetections(_detections);
   }
 
@@ -427,7 +494,7 @@ window.MapController = (() => {
       _editHandler.disable();
       $btnModeEdit.classList.remove('active', 'btn-primary');
       $btnModeEdit.classList.add('btn-ghost');
-      $btnModeEdit.innerHTML = '✍️ Editer';
+      $btnModeEdit.innerHTML = '✍️ Éditer';
     }
   }
 
@@ -437,8 +504,18 @@ window.MapController = (() => {
     Sidebar.setDetections([]);
   }
 
-  function _renderPolygons(detections) {
-    detections.forEach((d, i) => {
+  function deleteDetection(idx) {
+    if (idx >= 0 && idx < _detections.length) {
+      _detections.splice(idx, 1);
+      _renderPolygons();
+      Sidebar.setDetections(_detections);
+      Toast.show('Zone supprimée', 'info');
+    }
+  }
+
+  function _renderPolygons() {
+    _detectionPolygons.clearLayers();
+    _detections.forEach((d, idx) => {
       const conf = d.confidence;
       const color = conf >= 0.75 ? '#22c55e' : conf >= 0.5 ? '#f97316' : '#ef4444';
       const fillColor = conf >= 0.75 ? 'rgba(34,197,94,0.2)' : 'rgba(249,115,22,0.2)';
@@ -458,7 +535,6 @@ window.MapController = (() => {
       const est = Sidebar.computeEstimate(d.area_m2);
       const confClass = conf >= 0.75 ? 'high' : 'medium';
       const confLabel = conf >= 0.75 ? 'Haute confiance' : 'Confiance moyenne';
-      const idx = _detections.length - detections.length + i;
 
       poly.bindPopup(_buildPopupHTML(d, est, idx, confClass, confLabel), {
         maxWidth: 300,
@@ -475,6 +551,22 @@ window.MapController = (() => {
         if (item) {
           item.classList.add('selected');
           item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      });
+      
+      // Street View on right-click on a polygon
+      poly.on('contextmenu', (e) => {
+        L.DomEvent.stopPropagation(e); // prevent map contextmenu from firing twice
+        let lat, lng;
+        if (det.center) {
+           lat = det.center.lat;
+           lng = det.center.lng;
+        } else if (e.latlng) {
+           lat = e.latlng.lat;
+           lng = e.latlng.lng;
+        }
+        if (lat !== undefined && lng !== undefined) {
+           _openStreetViewModal(lat, lng);
         }
       });
 
@@ -530,6 +622,10 @@ window.MapController = (() => {
             onclick="navigator.clipboard && navigator.clipboard.writeText('${center.lat.toFixed(6)}, ${center.lng.toFixed(6)}'); Toast.show('Coords copiées', 'success')">
             📋 Coords
           </button>
+          <button class="btn btn-ghost" style="font-size:11px; color: #ef4444;"
+            onclick="MapController.deleteDetection(${idx})">
+            🗑️ Supprimer
+          </button>
         </div>
       </div>`;
   }
@@ -574,8 +670,97 @@ window.MapController = (() => {
     );
   }
 
+  // ── State Management for Projects ─────────────────────────
+  function getState() {
+    if (!_map) return null;
+    return {
+      center: _map.getCenter(),
+      zoom: _map.getZoom(),
+      layer: _currentLayer
+    };
+  }
+
+  function setState(state) {
+    if (!_map || !state) return;
+    if (state.center && state.zoom) {
+      _map.setView([state.center.lat, state.center.lng], state.zoom, { animate: false });
+    }
+    if (state.layer && state.layer !== _currentLayer) {
+      if (state.layer === 'ign') $btnIGN.click();
+      else $btnOSM.click();
+    }
+  }
+
+  function displayDetectionsDirect(detections) {
+    _detections = [...detections];
+    _renderPolygons();
+    Sidebar.setDetections(_detections);
+  }
+
+  let _routeLayer = null;
+  let _waypointMarkers = [];
+
+  function clearRoute() {
+    if (_routeLayer && _map) {
+      _map.removeLayer(_routeLayer);
+      _routeLayer = null;
+    }
+    _waypointMarkers.forEach(m => {
+      if (_map) _map.removeLayer(m);
+    });
+    _waypointMarkers = [];
+  }
+
+  function drawRoute(geojson, waypoints) {
+    clearRoute();
+    
+    if (!_map) return;
+    
+    // Draw the route line
+    _routeLayer = L.geoJSON(geojson, {
+      style: {
+        color: '#00b894',
+        weight: 5,
+        opacity: 0.8
+      }
+    }).addTo(_map);
+    
+    // Add markers for each waypoint
+    waypoints.forEach((wp, i) => {
+      const marker = L.circleMarker([wp.center.lat, wp.center.lng], {
+        radius: 8,
+        fillColor: '#00b894',
+        color: '#fff',
+        weight: 2,
+        opacity: 1,
+        fillOpacity: 1
+      }).addTo(_map);
+      
+      marker.bindTooltip(`<b>${i + 1}. ${wp.name}</b><br/>${wp.address}`, {
+        permanent: false,
+        direction: 'top'
+      });
+      
+      _waypointMarkers.push(marker);
+    });
+    
+    // Zoom to fit the route
+    _map.fitBounds(_routeLayer.getBounds(), { padding: [50, 50] });
+  }
+
   // ── Start ─────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', init);
 
-  return { clearDetections, showProgress, updateProgress, hideProgress };
+  return { 
+    clearDetections, 
+    deleteDetection, 
+    showProgress, 
+    updateProgress, 
+    hideProgress,
+    getState,
+    setState,
+    displayDetectionsDirect,
+    drawRoute,
+    clearRoute
+  };
 })();
