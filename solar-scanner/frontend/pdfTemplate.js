@@ -1,10 +1,45 @@
 window.PDFGenerator = (() => {
   'use strict';
 
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function multiline(value) {
+    return escapeHtml(value).replace(/\n/g, '<br/>');
+  }
+
+  function safeImage(src) {
+    const value = String(src || '');
+    if (/^data:image\/(png|jpeg|jpg|webp);base64,[a-z0-9+/=\s]+$/i.test(value)) {
+      return value;
+    }
+    return '';
+  }
+
+  function quoteNumber(settings) {
+    const year = new Date().getFullYear();
+    const n = parseInt(settings.next_quote_number, 10) || 1;
+    return 'DEV-' + year + '-' + String(n).padStart(3, '0');
+  }
+
+  function validityDays(settings) {
+    const days = parseInt(settings.quote_validity_days, 10);
+    if (!days || days < 1) return 30;
+    return Math.min(days, 365);
+  }
+
   function build(clientInfo, mapDataUrl, detections, settings, businessOptions, computeEstimate) {
     const now = new Date().toLocaleDateString('fr-FR', {
       year: 'numeric', month: 'long', day: 'numeric',
     });
+    const numero = quoteNumber(settings);
+    const jours = validityDays(settings);
     const total_area = detections.reduce((s, d) => s + d.area_m2, 0);
     let total_price_ht = detections.reduce((s, d) => s + computeEstimate(d.area_m2).price_ht, 0);
     const total_time = detections.reduce((s, d) => s + computeEstimate(d.area_m2).cleaning_min, 0);
@@ -20,18 +55,18 @@ window.PDFGenerator = (() => {
     businessOptions.forEach(opt => {
       if (opt.checked) {
         let optPrice = 0;
-        let desc = opt.label;
+        let desc = escapeHtml(opt.label);
         if (opt.type === 'multiplier') {
           optPrice = current_ht * (opt.value - 1);
           current_ht += optPrice;
-          desc += ' (x' + opt.value + ')';
+          desc += ' (x' + Number(opt.value) + ')';
         } else if (opt.type === 'fixed') {
-          optPrice = opt.value;
+          optPrice = Number(opt.value) || 0;
           current_ht += optPrice;
         } else if (opt.type === 'per_m2') {
-          optPrice = total_area * opt.value;
+          optPrice = total_area * (Number(opt.value) || 0);
           current_ht += optPrice;
-          desc += ' (' + opt.value + '\u20ac/m\u00b2)';
+          desc += ' (' + Number(opt.value) + '\u20ac/m\u00b2)';
         }
         optionRows += '<tr style="background: #fafafa;">'
           + '<td style="color: #888; font-size: 10px;">#OPT</td>'
@@ -47,8 +82,9 @@ window.PDFGenerator = (() => {
 
     const rows = detections.map((d, i) => {
       const est = computeEstimate(d.area_m2);
+      const label = escapeHtml(d.label || '#PAN-' + String(i + 1).padStart(4, '0'));
       return '<tr>'
-        + '<td>' + (d.label || '#PAN-' + String(i + 1).padStart(4, '0')) + '</td>'
+        + '<td>' + label + '</td>'
         + '<td>Nettoyage panneau photovolta\u00efque</td>'
         + '<td>' + d.area_m2.toFixed(1) + '</td>'
         + '<td>' + est.unitPrice.toFixed(2) + ' \u20ac</td>'
@@ -56,28 +92,34 @@ window.PDFGenerator = (() => {
         + '</tr>';
     }).join('');
 
-    const logoHtml = settings.company_logo
-      ? '<img src="' + settings.company_logo + '" class="logo" />'
-      : '<div class="logo-placeholder">' + (settings.company_name || 'Votre Soci\u00e9t\u00e9') + '</div>';
+    const logo = safeImage(settings.company_logo);
+    const companyName = escapeHtml(settings.company_name || 'Votre Soci\u00e9t\u00e9');
+    const companySiret = escapeHtml(settings.company_siret || 'SIRET: XXX XXX XXX');
+    const companyAddr = settings.company_address
+      ? multiline(settings.company_address)
+      : 'Adresse de votre soci\u00e9t\u00e9';
+    const clientName = escapeHtml(clientInfo.name || 'Client');
+    const clientAddr = multiline(clientInfo.address || '');
 
-    const mapHtml = mapDataUrl
-      ? '<div class="map-container"><h4>Aper\u00e7u des zones d\u00e9tect\u00e9es</h4><img src="' + mapDataUrl + '" /></div>'
+    const logoHtml = logo
+      ? '<img src="' + logo + '" class="logo" />'
+      : '<div class="logo-placeholder">' + companyName + '</div>';
+
+    const mapSrc = safeImage(mapDataUrl);
+    const mapHtml = mapSrc
+      ? '<div class="map-container"><h4>Aper\u00e7u des zones d\u00e9tect\u00e9es</h4><img src="' + mapSrc + '" /></div>'
       : '';
 
-    const watermarkHtml = settings.company_logo
-      ? '<img src="' + settings.company_logo + '" class="watermark" />'
-      : '<div class="watermark-text">' + (settings.company_name || 'SolarScan') + '</div>';
-
-    const companyAddr = settings.company_address
-      ? settings.company_address.replace(/\n/g, '<br/>')
-      : 'Adresse de votre soci\u00e9t\u00e9';
+    const watermarkHtml = logo
+      ? '<img src="' + logo + '" class="watermark" />'
+      : '<div class="watermark-text">' + companyName + '</div>';
 
     const timeStr = total_time >= 60
       ? (total_time / 60).toFixed(1) + 'h'
       : total_time.toFixed(0) + 'min';
 
     const html = '<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/>'
-      + '<title>Devis - Nettoyage Panneaux</title>'
+      + '<title>Devis ' + escapeHtml(numero) + '</title>'
       + '<style>'
       + 'body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 13px; color: #333; margin: 40px; }'
       + '.header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }'
@@ -116,22 +158,23 @@ window.PDFGenerator = (() => {
       + '<div class="header">'
       + '<div class="company-info">'
       + logoHtml
-      + '<div class="company-name">' + (settings.company_name || 'Votre Soci\u00e9t\u00e9') + '</div>'
+      + '<div class="company-name">' + companyName + '</div>'
       + '<div>' + companyAddr + '</div>'
-      + '<div style="margin-top: 5px; color: #666;">' + (settings.company_siret || 'SIRET: XXX XXX XXX') + '</div>'
+      + '<div style="margin-top: 5px; color: #666;">' + companySiret + '</div>'
       + '</div>'
-      + '<div><h1 class="document-title">DEVIS</h1></div>'
+      + '<div><h1 class="document-title">DEVIS</h1>'
+      + '<div style="text-align:right; color:#666; margin-top:6px;">' + escapeHtml(numero) + '</div></div>'
       + '</div>'
 
       + '<div class="meta-row">'
       + '<div class="client-info">'
       + '<h4>Factur\u00e9 \u00e0</h4>'
-      + '<div class="c-name">' + clientInfo.name + '</div>'
-      + '<div>' + clientInfo.address.replace(/\n/g, '<br/>') + '</div>'
+      + '<div class="c-name">' + clientName + '</div>'
+      + '<div>' + clientAddr + '</div>'
       + '</div>'
       + '<div class="invoice-details"><table>'
-      + '<tr><th>Date :</th><td>' + now + '</td></tr>'
-      + '<tr><th>Validit\u00e9 :</th><td>30 jours</td></tr>'
+      + '<tr><th>Date :</th><td>' + escapeHtml(now) + '</td></tr>'
+      + '<tr><th>Validit\u00e9 :</th><td>' + jours + ' jours</td></tr>'
       + '</table></div>'
       + '</div>'
 
@@ -164,13 +207,55 @@ window.PDFGenerator = (() => {
       + '</p></div>'
 
       + '<div class="footer">'
-      + (settings.company_name || 'Votre Soci\u00e9t\u00e9') + ' - ' + (settings.company_siret || 'SIRET Non renseign\u00e9') + '<br/>'
-      + 'G\u00e9n\u00e9r\u00e9 par SolarScanner'
+      + companyName + ' - ' + (settings.company_siret ? companySiret : 'SIRET Non renseign\u00e9') + '<br/>'
+      + 'G\u00e9n\u00e9r\u00e9 par SolarScan ' + numero
       + '</div>'
       + '</body></html>';
 
     return html;
   }
 
-  return { build };
+  function buildTourSheet(stops, summary, settings) {
+    const now = new Date().toLocaleDateString('fr-FR', {
+      year: 'numeric', month: 'long', day: 'numeric',
+    });
+    const companyName = escapeHtml(settings.company_name || 'SolarScan');
+    const rows = stops.map((stop, i) => {
+      return '<tr>'
+        + '<td>' + (i + 1) + '</td>'
+        + '<td>' + escapeHtml(stop.name || 'Client') + '</td>'
+        + '<td>' + escapeHtml(stop.address || '') + '</td>'
+        + '<td style="text-align:right;">' + Number(stop.price || 0).toFixed(2) + ' \u20ac</td>'
+        + '</tr>';
+    }).join('');
+
+    let bilan = '';
+    if (summary) {
+      bilan = '<div class="note"><strong>Bilan :</strong> '
+        + Number(summary.distanceKm).toFixed(1) + ' km, '
+        + Math.round(summary.timeMin) + ' min de route, '
+        + Number(summary.mileageCost).toFixed(0) + ' \u20ac de frais, '
+        + 'total ' + Number(summary.total).toFixed(0) + ' \u20ac HT.</div>';
+    }
+
+    return '<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/>'
+      + '<title>Feuille de route</title>'
+      + '<style>'
+      + 'body { font-family: Helvetica, Arial, sans-serif; font-size: 13px; color: #222; margin: 40px; }'
+      + 'h1 { color: #00b894; font-weight: 500; letter-spacing: 1px; }'
+      + 'table { width: 100%; border-collapse: collapse; margin-top: 16px; }'
+      + 'th { background: #1a1a2e; color: white; text-align: left; padding: 8px; font-size: 11px; }'
+      + 'td { padding: 8px; border-bottom: 1px solid #eee; }'
+      + '.note { margin-top: 20px; background: #f0faf8; border: 1px solid #00b894; padding: 12px; }'
+      + '</style></head><body>'
+      + '<h1>Feuille de route</h1>'
+      + '<p>' + companyName + ' — ' + escapeHtml(now) + '</p>'
+      + '<table><thead><tr><th>#</th><th>Client</th><th>Adresse</th><th>Prix HT</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody></table>'
+      + bilan
+      + '<p style="margin-top:28px;color:#888;font-size:11px;">Généré par SolarScan 1.5</p>'
+      + '</body></html>';
+  }
+
+  return { build, buildTourSheet, escapeHtml, quoteNumber, safeImage };
 })();

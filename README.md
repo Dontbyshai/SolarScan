@@ -1,6 +1,6 @@
 <div align="center">
   <img src="solar-scanner/assets/logo.png" alt="SolarScan Logo" width="250" />
-  <h1>SolarScan 🛰️☀️</h1>
+  <h1>SolarScan 1.5 🛰️☀️</h1>
   <p><strong>Logiciel professionnel de détection de panneaux solaires par imagerie satellite pour la facturation de nettoyage.</strong></p>
 </div>
 
@@ -27,6 +27,9 @@
     *   **Filigrane transparent** (votre logo) élégamment placé au centre du PDF pour prouver l'authenticité de vos devis.
 *   📊 **Export CSV Compatible Excel FR** : Exportez la liste complète des détections avec un CSV dont le formatage est parfaitement adapté au marché français (séparateurs en point-virgule, virgules décimales, accents UTF-8 gérés).
 *   🏢 **Personnalisation** : Importez votre propre logo, configurez le nom, l'adresse, le SIRET de votre société, et votre taux de TVA.
+*   🕘 **Historique des devis** : chaque PDF généré est noté sur l'ordinateur (client, surface, montants). L'historique s'exporte en CSV.
+*   🎯 **Seuil de confiance et fusion des doublons** : ignorez les détections trop incertaines, et fusionnez deux tracés du même toit (moins de 15 m).
+*   🚗 **Feuille de route** : numéro de devis automatique, durée de validité réglable, et export PDF de la tournée du jour.
 
 ---
 
@@ -39,38 +42,55 @@ L'application est divisée en deux parties : un backend (Python) pour le moteur 
 *   **Python** (v3.10+)
 
 ### 2. Installation
-Ouvrez votre terminal à la racine du projet et installez les dépendances :
+Tout le code est dans le dossier `solar-scanner/`. Depuis la racine du dépôt :
 
 ```bash
-# Frontend (Electron)
-cd electron
+# Interface (Electron)
+cd solar-scanner/electron
 npm install
-cd ..
+cd ../..
 
-# Backend (Python)
-cd backend
+# Moteur (Python)
+cd solar-scanner/backend
 python3 -m venv venv
 source venv/bin/activate      # Sur macOS/Linux
 # venv\Scripts\activate       # Sur Windows
 pip install -r requirements.txt
-cd ..
+cd ../..
 ```
 
 ### 3. Lancement
-Pour lancer le logiciel en mode développement, vous devez ouvrir **deux terminaux** :
+Electron démarre **tout seul** le moteur Python sur `127.0.0.1:8765`. Un seul terminal suffit :
 
-**Terminal 1 — Le Moteur (Backend)**
 ```bash
-cd backend
-source venv/bin/activate
-uvicorn main:app --host 127.0.0.1 --port 8765 --reload
-```
-
-**Terminal 2 — L'Interface (Frontend)**
-```bash
-cd electron
+cd solar-scanner/electron
 npm start
 ```
+
+Ne lancez pas `uvicorn` en même temps : le port 8765 serait déjà pris, et l'application refuserait de démarrer. Pour travailler sur le moteur seul, quittez d'abord SolarScan, puis :
+
+```bash
+cd solar-scanner/backend
+source venv/bin/activate
+python -m uvicorn main:app --host 127.0.0.1 --port 8765
+```
+
+### 4. Modèle IA (optionnel)
+Sans poids YOLO, SolarScan utilise une heuristique de couleur (confiance plafonnée à 70 %). Pour le modèle :
+
+```bash
+cd solar-scanner/backend
+source venv/bin/activate
+python download_model.py
+```
+
+Le fichier `solar_detector.pt` est enregistré dans le dossier de données de l'utilisateur, pas dans le programme (qui est souvent en lecture seule une fois installé) :
+
+*   macOS : `~/Library/Application Support/SolarScan`
+*   Windows : `%APPDATA%\SolarScan`
+*   Linux : `~/.config/SolarScan`
+
+On y trouve aussi `settings.json`, `historique.json` et le cache des tuiles (`cache/tiles.db`). Le statut en haut à droite indique `IA prête (YOLO)` ou `IA prête (heuristique)`.
 
 ---
 
@@ -87,11 +107,11 @@ npm start
 ## 🛠️ Architecture Technique
 
 *   **Frontend** : HTML5, CSS3 Natif (Design System sur-mesure ultra-léger), JavaScript (Vanilla), Leaflet (Cartographie), Electron (Moteur desktop).
-*   **Backend** : FastAPI (Python), OpenStreetMap Nominatim (Géocodage inverse & Recherche).
+*   **Backend** : FastAPI (Python), OpenCV, Ultralytics (YOLOv8) si le modèle est téléchargé, OpenStreetMap Nominatim (géocodage) et OSRM (itinéraire), le tout uniquement en local sur `127.0.0.1`.
 *   **Système d'exports** : `printToPDF` (Chromium Electron) générant les documents vectoriels, exports CSV formattés sur-mesure en UTF-8 BOM.
 
 ---
 
 <div align="center">
-  <p>© 2024 SolarScan — Développé avec ❤️ par dontbyshai</p>
+  <p>© 2024–2026 SolarScan — Développé avec ❤️ par dontbyshai — Licence MIT</p>
 </div>
