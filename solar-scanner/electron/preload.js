@@ -3,14 +3,24 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('solarAPI', {
+  // Jeton du moteur local (jamais écrit dans un fichier)
+  getToken: () => ipcRenderer.invoke('get-api-token'),
+
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
 
+  // Projets et historique
+  saveProject: (project) => ipcRenderer.invoke('save-project', project),
+  openProject: () => ipcRenderer.invoke('open-project'),
+  getHistory: () => ipcRenderer.invoke('get-history'),
+  appendHistory: (entry) => ipcRenderer.invoke('append-history', entry),
+  exportHistoryCSV: () => ipcRenderer.invoke('export-history-csv'),
+
   // Exports
   exportGeoJSON: (geojson) => ipcRenderer.invoke('export-geojson', geojson),
   exportCSV: (rows) => ipcRenderer.invoke('export-csv', rows),
-  exportPDF: (html) => ipcRenderer.invoke('export-pdf', html),
+  exportPDF: (html, suggestedName) => ipcRenderer.invoke('export-pdf', html, suggestedName),
   captureRect: (rect) => ipcRenderer.invoke('capture-rect', rect),
 
   // Cache

@@ -7,7 +7,6 @@
 window.MapController = (() => {
   'use strict';
 
-  const BACKEND_URL = 'http://127.0.0.1:8765';
   const AUTO_TRIGGER_ZOOM = 17;
   const DEBOUNCE_MS = 800;
 
@@ -178,7 +177,7 @@ window.MapController = (() => {
       if (!query) return;
       $btnSearch.textContent = '⏳';
       try {
-        const res = await fetch(`${BACKEND_URL}/geocode/search?q=${encodeURIComponent(query)}`);
+        const res = await SolarApi.request(`/geocode/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
         if (data && data.length > 0) {
           const result = data[0];
@@ -202,18 +201,30 @@ window.MapController = (() => {
   // ── Backend health check (fallback without Electron) ─────
   async function _checkBackendDirectly() {
     try {
-      const res = await fetch(`${BACKEND_URL}/health`);
-      if (res.ok) _setBackendReady(true);
-      else setTimeout(_checkBackendDirectly, 3000);
+      const res = await SolarApi.request('/health');
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        _setBackendReady(true, data.engine);
+      } else {
+        setTimeout(_checkBackendDirectly, 3000);
+      }
     } catch {
       setTimeout(_checkBackendDirectly, 3000);
     }
   }
 
-  function _setBackendReady(ready) {
+  function _setBackendReady(ready, engine) {
     _isBackendReady = ready;
     $statusDot.className = `status-dot ${ready ? 'online' : 'offline'}`;
-    $statusText.textContent = ready ? 'IA prête' : 'IA hors ligne';
+    if (!ready) {
+      $statusText.textContent = 'IA hors ligne';
+    } else if (engine === 'yolo') {
+      $statusText.textContent = 'IA prête (YOLO)';
+    } else if (engine === 'heuristique') {
+      $statusText.textContent = 'IA prête (heuristique)';
+    } else {
+      $statusText.textContent = 'IA prête';
+    }
   }
 
   // ── Layer switching ───────────────────────────────────────
@@ -310,12 +321,14 @@ window.MapController = (() => {
 
     let tiles = GeoUtils.tilesInBounds(georgraphicBounds, zoom);
 
-    // Sécurité pour éviter de planter le backend si l'écran est gigantesque
-    if (tiles.length > 150) {
+    const configured = (window.Sidebar && Sidebar.getSettings().max_tiles_auto) || 20;
+    const limit = Math.max(1, Math.min(80, configured));
+    if (tiles.length > limit) {
       if (window.Toast) window.Toast.show('Zone très vaste, analyse partielle. Zoomez davantage.', 'warning');
-      // Garder les tuiles centrales (méthode simple)
       const mid = Math.floor(tiles.length / 2);
-      tiles = tiles.slice(Math.max(0, mid - 75), mid + 75);
+      const half = Math.floor(limit / 2);
+      const start = Math.max(0, Math.min(tiles.length - limit, mid - half));
+      tiles = tiles.slice(start, start + limit);
     }
 
     return tiles.map((t) => ({
@@ -433,7 +446,7 @@ window.MapController = (() => {
     _isAnalyzing = true;
 
     try {
-      const response = await fetch(`${BACKEND_URL}/analyze`, {
+      const response = await SolarApi.request('/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tiles }),
@@ -558,9 +571,9 @@ window.MapController = (() => {
       poly.on('contextmenu', (e) => {
         L.DomEvent.stopPropagation(e); // prevent map contextmenu from firing twice
         let lat, lng;
-        if (det.center) {
-           lat = det.center.lat;
-           lng = det.center.lng;
+        if (d.center) {
+           lat = d.center.lat;
+           lng = d.center.lng;
         } else if (e.latlng) {
            lat = e.latlng.lat;
            lng = e.latlng.lng;
@@ -673,8 +686,9 @@ window.MapController = (() => {
   // ── State Management for Projects ─────────────────────────
   function getState() {
     if (!_map) return null;
+    const center = _map.getCenter();
     return {
-      center: _map.getCenter(),
+      center: { lat: center.lat, lng: center.lng },
       zoom: _map.getZoom(),
       layer: _currentLayer
     };

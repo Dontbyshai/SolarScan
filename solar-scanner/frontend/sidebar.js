@@ -22,7 +22,9 @@ window.Sidebar = (() => {
     company_name: 'Solar Scanner',
     company_address: '123 Avenue de l\'Innovation, 75000 Paris',
     company_siret: '123 456 789 00010',
-    company_logo: '../assets/logo.png',
+    company_logo: '',
+    quote_validity_days: 30,
+    next_quote_number: 1,
     roi_prod_kwh: 200, // Production moyenne kWh/m²/an
     roi_price_kwh: 0.25, // Prix du kWh moyen en €
     roi_loss_percent: 15, // Pourcentage de perte due à l'encrassement
@@ -36,6 +38,34 @@ window.Sidebar = (() => {
     { id: 'opt-dirt', label: 'Encrassement extrême (+30%)', type: 'multiplier', value: 1.3, checked: false },
     { id: 'opt-moss', label: 'Présence de lichens (+15%)', type: 'multiplier', value: 1.15, checked: false },
   ];
+  let _confidenceMin = 0;
+  let _tourneeSummary = null;
+
+  function escapeText(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function isBillable(d) {
+    if (!d || d.checked === false) return false;
+    const conf = typeof d.confidence === 'number' ? d.confidence : 1;
+    return conf + 1e-9 >= _confidenceMin;
+  }
+
+  function quoteTotals(list) {
+    const area = list.reduce((s, d) => s + d.area_m2, 0);
+    let ht = list.reduce((s, d) => s + computeEstimate(d.area_m2).price_ht, 0);
+    _businessOptions.forEach((opt) => {
+      if (!opt.checked) return;
+      if (opt.type === 'multiplier') ht *= opt.value;
+      else if (opt.type === 'fixed') ht += opt.value;
+      else if (opt.type === 'per_m2') ht += area * opt.value;
+    });
+    return { area, ht, ttc: ht * (1 + _settings.vat_rate) };
+  }
 
   // ── Session Storage ────────────────────────────────────────
   function _saveSessionToStorage() {
@@ -43,7 +73,8 @@ window.Sidebar = (() => {
       localStorage.setItem('solarscan_session', JSON.stringify({
         detections: _detections,
         tournee: _tournee,
-        businessOptions: _businessOptions
+        businessOptions: _businessOptions,
+        confidenceMin: _confidenceMin,
       }));
     } catch (e) {
       console.warn("Erreur sauvegarde session locale:", e);
@@ -58,6 +89,13 @@ window.Sidebar = (() => {
         if (session.detections) _detections = session.detections;
         if (session.tournee) _tournee = session.tournee;
         if (session.businessOptions) _businessOptions = session.businessOptions;
+        if (typeof session.confidenceMin === 'number') {
+          _confidenceMin = Math.min(0.9, Math.max(0, session.confidenceMin));
+          const slider = document.getElementById('confidence-min');
+          const label = document.getElementById('confidence-min-label');
+          if (slider) slider.value = String(Math.round(_confidenceMin * 100));
+          if (label) label.textContent = `${Math.round(_confidenceMin * 100)} %`;
+        }
         
         // Restore polygons on map if possible
         if (_detections.length > 0) {
@@ -209,6 +247,10 @@ window.Sidebar = (() => {
     _settings.roi_price_kwh = parseFloat($inputRoiPrice.value) || 0.25;
     _settings.roi_loss_percent = parseFloat($inputRoiLoss.value) || 15;
     _settings.mileage_cost = parseFloat($inputMileageCost.value) || 0.5;
+    const validityInput = document.getElementById('setting-validity');
+    const quoteNextInput = document.getElementById('setting-quote-next');
+    _settings.quote_validity_days = Math.min(365, parseInt(validityInput && validityInput.value, 10) || 30);
+    _settings.next_quote_number = Math.max(1, parseInt(quoteNextInput && quoteNextInput.value, 10) || 1);
 
     if (window.solarAPI) {
       await window.solarAPI.saveSettings(_settings);
@@ -262,6 +304,10 @@ window.Sidebar = (() => {
       $inputRoiPrice.value = _settings.roi_price_kwh !== undefined ? _settings.roi_price_kwh : 0.25;
       $inputRoiLoss.value = _settings.roi_loss_percent !== undefined ? _settings.roi_loss_percent : 15;
       $inputMileageCost.value = _settings.mileage_cost !== undefined ? _settings.mileage_cost : 0.5;
+      const validityInput = document.getElementById('setting-validity');
+      const quoteNextInput = document.getElementById('setting-quote-next');
+      if (validityInput) validityInput.value = _settings.quote_validity_days || 30;
+      if (quoteNextInput) quoteNextInput.value = _settings.next_quote_number || 1;
 
       if (_settings.company_logo && _settings.company_logo.length > 10) {
         $logoPreview.src = _settings.company_logo;
@@ -274,7 +320,7 @@ window.Sidebar = (() => {
   function getPriceForArea(area_m2) {
     if (!_settings.price_tiers) return 3.0;
     for (const tier of _settings.price_tiers) {
-      if (area_m2 <= tier.max) return tier.price;
+      if (tier.max == null || area_m2 <= tier.max) return tier.price;
     }
     return _settings.price_tiers[_settings.price_tiers.length - 1].price;
   }
@@ -325,7 +371,7 @@ window.Sidebar = (() => {
         html += `
           <label class="business-opt-label">
             <input type="checkbox" data-idx="${idx}" ${opt.checked ? 'checked' : ''} class="business-opt-cb">
-            <span>${opt.label}</span>
+            <span>${escapeText(opt.label)}</span>
           </label>
         `;
       });
@@ -346,19 +392,10 @@ window.Sidebar = (() => {
 
   // ── Render ────────────────────────────────────────────────
   function _render() {
-    // Ne calculer le total que pour les détections cochées (par défaut true)
-    const active_detections = _detections.filter(d => d.checked !== false);
-    const total_area = active_detections.reduce((s, d) => s + d.area_m2, 0);
-    let total_price = active_detections.reduce((s, d) => s + computeEstimate(d.area_m2).price_ht, 0);
-
-    // Appliquer les options métier (business options)
-    _businessOptions.forEach(opt => {
-      if (opt.checked) {
-        if (opt.type === 'multiplier') total_price *= opt.value;
-        else if (opt.type === 'fixed') total_price += opt.value;
-        else if (opt.type === 'per_m2') total_price += (total_area * opt.value);
-      }
-    });
+    const active_detections = _detections.filter(isBillable);
+    const totals = quoteTotals(active_detections);
+    const total_area = totals.area;
+    const total_price = totals.ht;
 
     _renderBusinessOptions();
 
@@ -372,17 +409,22 @@ window.Sidebar = (() => {
       : `0<span class="stat-unit">€</span>`;
 
     const hasResults = _detections.length > 0;
-    if ($btnExportPDF) $btnExportPDF.disabled = !hasResults;
+    const hasBillable = active_detections.length > 0;
+    if ($btnExportPDF) $btnExportPDF.disabled = !hasBillable;
     if ($btnClearResults) $btnClearResults.disabled = !hasResults;
     if ($btnSaveProject) $btnSaveProject.disabled = !hasResults;
+    if ($btnExportCSV) $btnExportCSV.disabled = !hasBillable;
+    const $merge = document.getElementById('btn-merge-duplicates');
+    if ($merge) $merge.disabled = _detections.length < 2;
 
     if (!hasResults) {
       $list.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">🛰</div>
           <div class="empty-title">Aucune détection</div>
-          <div class="empty-desc">Activez le mode Auto (zoom ≥ 17 sur IGN) ou dessinez une zone avec le mode Zone.</div>
+          <div class="empty-desc">Cliquez sur Scanner (zoom ≥ 17, fond IGN) ou dessinez un panneau.</div>
         </div>`;
+      _saveSessionToStorage();
       return;
     }
 
@@ -391,18 +433,20 @@ window.Sidebar = (() => {
       const conf = d.confidence;
       const confClass = conf >= 0.75 ? 'high' : conf >= 0.5 ? 'medium' : 'low';
       const confLabel = conf >= 0.75 ? 'Haute' : conf >= 0.5 ? 'Moyenne' : 'Basse';
-      const isChecked = d.checked !== false ? 'checked' : '';
-      const opacity = d.checked !== false ? '1.0' : '0.5';
+      const below = (typeof conf === 'number' ? conf : 1) < _confidenceMin;
+      const isChecked = !below && d.checked !== false ? 'checked' : '';
+      const opacity = !below && d.checked !== false ? '1.0' : '0.5';
+      const label = d.label || '#PAN-' + String(i + 1).padStart(4, '0');
 
       return `
         <div class="detection-item" data-idx="${i}" role="button" tabindex="0" aria-label="Panneau ${i + 1}" style="opacity: ${opacity};">
-          <input type="checkbox" class="detection-checkbox" data-idx="${i}" ${isChecked} title="Inclure dans le total" style="margin-right: 12px; transform: scale(1.2); cursor: pointer;">
+          <input type="checkbox" class="detection-checkbox" data-idx="${i}" ${isChecked} ${below ? 'disabled' : ''} title="Inclure dans le total" style="margin-right: 12px; transform: scale(1.2); cursor: pointer;">
           <div class="detection-badge ${confClass}"></div>
           <div class="detection-info">
-            <input type="text" class="detection-label-input" data-idx="${i}" value="${d.label || '#PAN-' + String(i + 1).padStart(4, '0')}" />
+            <input type="text" class="detection-label-input" data-idx="${i}" value="${escapeText(label)}" />
             <div class="detection-area">${d.area_m2.toFixed(1)} m²</div>
             <div class="detection-meta">
-              <span>🎯 ${confLabel} (${(conf * 100).toFixed(0)}%)</span>
+              <span>🎯 ${confLabel} (${(conf * 100).toFixed(0)}%)${below ? ' · sous le seuil' : ''}</span>
               <span>📍 ${d.center ? d.center.lat.toFixed(5) + ', ' + d.center.lng.toFixed(5) : '—'}</span>
             </div>
           </div>
@@ -484,7 +528,7 @@ window.Sidebar = (() => {
     _businessOptions.forEach((opt, i) => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td><input type="text" class="opt-label" value="${opt.label}"></td>
+        <td><input type="text" class="opt-label" value="${escapeText(opt.label)}"></td>
         <td>
           <select class="opt-type">
             <option value="multiplier" ${opt.type==='multiplier'?'selected':''}>Multiplicateur (ex: 1.2)</option>
@@ -541,7 +585,7 @@ window.Sidebar = (() => {
   if ($btnExportCSV) {
     $btnExportCSV.addEventListener('click', async () => {
       if (!_detections.length || !window.solarAPI) return;
-    const rows = _detections.map((d) => {
+    const rows = _detections.filter(isBillable).map((d) => {
       const est = computeEstimate(d.area_m2);
       return {
         lat: d.center ? d.center.lat : 0,
@@ -569,10 +613,11 @@ window.Sidebar = (() => {
     $btnSaveProject.addEventListener('click', async () => {
       if (!_detections.length || !window.solarAPI) return;
       const projectData = {
-        version: 1,
+        version: '1.5.0',
         date: new Date().toISOString(),
         detections: _detections,
         businessOptions: _businessOptions,
+        confidenceMin: _confidenceMin,
         mapState: window.MapController ? window.MapController.getState() : null
       };
       
@@ -590,17 +635,22 @@ window.Sidebar = (() => {
       if (res.ok && res.data) {
         // Restaurer le projet
         const data = res.data;
+        if (data.businessOptions) {
+          _businessOptions = data.businessOptions;
+        }
+        if (typeof data.confidenceMin === 'number') {
+          _confidenceMin = Math.min(0.9, Math.max(0, data.confidenceMin));
+          const slider = document.getElementById('confidence-min');
+          const label = document.getElementById('confidence-min-label');
+          if (slider) slider.value = String(Math.round(_confidenceMin * 100));
+          if (label) label.textContent = `${Math.round(_confidenceMin * 100)} %`;
+        }
         if (data.detections) {
-          clearDetections();
-          // Injection silencieuse des detections (sans append)
           if (window.MapController && window.MapController.displayDetectionsDirect) {
             window.MapController.displayDetectionsDirect(data.detections);
           } else {
-            setDetections(data.detections); // Fallback mais risque de bug en fonction de l'impl de map.js
+            setDetections(data.detections);
           }
-        }
-        if (data.businessOptions) {
-          _businessOptions = data.businessOptions;
         }
         if (data.mapState && window.MapController && window.MapController.setState) {
           window.MapController.setState(data.mapState);
@@ -623,8 +673,7 @@ window.Sidebar = (() => {
         if (firstDet && firstDet.center) {
           $inputClientAddress.placeholder = "Recherche de l'adresse en cours...";
           const { lat, lng } = firstDet.center;
-          const BACKEND_URL = 'http://127.0.0.1:8765';
-          const res = await fetch(`${BACKEND_URL}/geocode/reverse?lat=${lat}&lon=${lng}`);
+          const res = await SolarApi.request(`/geocode/reverse?lat=${lat}&lon=${lng}`);
           const data = await res.json();
           if (data && data.address) {
             const addr = data.address;
@@ -684,9 +733,14 @@ window.Sidebar = (() => {
   }
 
   $btnClientConfirm.addEventListener('click', async () => {
+    const billableNow = _detections.filter(isBillable);
+    if (!billableNow.length) {
+      Toast.show('Aucun panneau au-dessus du seuil de confiance', 'warning');
+      return;
+    }
     $clientModal.style.display = 'none';
     
-    if (!_detections.length || !window.solarAPI) return;
+    if (!window.solarAPI) return;
     
     // Attendre que la modale disparaisse visuellement de l'écran avant de capturer
     await new Promise(resolve => setTimeout(resolve, 600));
@@ -711,16 +765,40 @@ window.Sidebar = (() => {
       mapDataUrl = await window.solarAPI.captureRect(bounds);
     }
 
-    const html = window.PDFGenerator.build(clientInfo, mapDataUrl, _detections, _settings, _businessOptions, computeEstimate);
-    const res = await window.solarAPI.exportPDF(html);
-    if (res.ok) Toast.show(`Devis PDF exporté avec succès !`, 'success');
-    else if (res.reason !== 'cancelled') Toast.show('Erreur export PDF', 'error');
+    const billable = _detections.filter(isBillable);
+    const totals = quoteTotals(billable);
+    const numero = window.PDFGenerator.quoteNumber(_settings);
+    const html = window.PDFGenerator.build(clientInfo, mapDataUrl, billable, _settings, _businessOptions, computeEstimate);
+    const res = await window.solarAPI.exportPDF(html, `${numero}.pdf`);
+    if (res.ok) {
+      const current = parseInt(_settings.next_quote_number, 10) || 1;
+      _settings.next_quote_number = current + 1;
+      const quoteNextInput = document.getElementById('setting-quote-next');
+      if (quoteNextInput) quoteNextInput.value = _settings.next_quote_number;
+      if (window.solarAPI.saveSettings) await window.solarAPI.saveSettings(_settings);
+      if (window.solarAPI.appendHistory) {
+        await window.solarAPI.appendHistory({
+          id: String(Date.now()),
+          date: new Date().toISOString(),
+          numero,
+          client: clientInfo.name,
+          adresse: clientInfo.address,
+          panneaux: billable.length,
+          surface_m2: totals.area,
+          prix_ht: totals.ht,
+          prix_ttc: totals.ttc,
+          fichier: res.filePath || '',
+        });
+      }
+      Toast.show(`Devis ${numero} exporté`, 'success');
+    } else if (res.reason !== 'cancelled') Toast.show('Erreur export PDF', 'error');
   });
 
 
 
   // ── Tournée Logic ─────────────────────────────────────────
   function _renderTournee() {
+    _tourneeSummary = null;
     if ($btnOpenTournee) {
       $btnOpenTournee.innerHTML = `🚗 Ma Tournée (${_tournee.length})`;
     }
@@ -731,15 +809,16 @@ window.Sidebar = (() => {
           <td>
             ${i === 0 ? '<span title="Point de départ" style="font-size: 16px;">📍</span>' : `<span style="color: #666; font-size: 11px;">Étape ${i}</span>`}
           </td>
-          <td>${t.name}</td>
-          <td>${t.address}</td>
+          <td>${escapeText(t.name)}</td>
+          <td>${escapeText(t.address)}</td>
           <td style="text-align: right; font-weight: bold; display: flex; align-items: center; justify-content: flex-end; gap: 6px;">
-            ${t.price.toFixed(2)} €
+            ${Number(t.price || 0).toFixed(2)} €
             <div style="display: flex; flex-direction: column; gap: 2px;">
               <span class="btn-up-tournee" data-idx="${i}" style="cursor: ${i === 0 ? 'not-allowed; opacity: 0.3;' : 'pointer;'}" title="Monter">🔼</span>
               <span class="btn-down-tournee" data-idx="${i}" style="cursor: ${i === _tournee.length - 1 ? 'not-allowed; opacity: 0.3;' : 'pointer;'}" title="Descendre">🔽</span>
             </div>
             <span class="btn-edit-tournee" data-idx="${i}" style="cursor: pointer; margin-left: 8px;" title="Modifier">✏️</span>
+            <span class="btn-delete-tournee" data-idx="${i}" style="cursor: pointer;" title="Retirer">🗑️</span>
           </td>
         </tr>
       `).join('');
@@ -754,6 +833,16 @@ window.Sidebar = (() => {
           </tr>
         `;
       }
+
+      $tourneeTbody.querySelectorAll('.btn-delete-tournee').forEach(btn => {
+        btn.addEventListener('click', () => {
+          _tournee.splice(parseInt(btn.dataset.idx, 10), 1);
+          _renderTournee();
+          if (window.MapController && window.MapController.clearRoute) {
+            window.MapController.clearRoute();
+          }
+        });
+      });
 
       $tourneeTbody.querySelectorAll('.btn-edit-tournee').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -835,9 +924,7 @@ window.Sidebar = (() => {
 
           $inputTourneeAddAddress.placeholder = "Recherche de l'adresse en cours...";
           const { lat, lng } = center;
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
-            headers: { 'Accept-Language': 'fr' }
-          });
+          const res = await SolarApi.request(`/geocode/reverse?lat=${lat}&lon=${lng}`);
           const data = await res.json();
           if (data && data.address) {
             const addr = data.address;
@@ -968,15 +1055,17 @@ window.Sidebar = (() => {
         return;
       }
       
-      // Construire la chaîne de coordonnées lon,lat;lon,lat
-      const coords = _tournee.map(t => `${t.center.lng.toFixed(6)},${t.center.lat.toFixed(6)}`).join(';');
-      const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
-      
       try {
-        const res = await fetch(url);
+        const res = await SolarApi.request('/route', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            points: _tournee.map((t) => ({ lat: t.center.lat, lng: t.center.lng })),
+          }),
+        });
         const data = await res.json();
         
-        if (data.code === 'Ok') {
+        if (res.ok && data.code === 'Ok') {
           const route = data.routes[0];
           const distanceKm = route.distance / 1000;
           const timeMin = route.duration / 60;
@@ -985,6 +1074,12 @@ window.Sidebar = (() => {
           const mileageCostRate = _settings.mileage_cost !== undefined ? _settings.mileage_cost : 0.5;
           const totalMileageCost = distanceKm * mileageCostRate;
           const totalFinal = totalRevenue + totalMileageCost;
+          _tourneeSummary = {
+            distanceKm,
+            timeMin,
+            mileageCost: totalMileageCost,
+            total: totalFinal,
+          };
           
           document.getElementById('tournee-distance').textContent = distanceKm.toFixed(1);
           document.getElementById('tournee-time').textContent = timeMin.toFixed(0);
@@ -1018,12 +1113,107 @@ window.Sidebar = (() => {
           
           Toast.show('Itinéraire calculé avec succès !', 'success');
         } else {
-          Toast.show('Erreur de calcul OSRM: ' + data.code, 'error');
+          Toast.show('Erreur de calcul d\'itinéraire', 'error');
         }
       } catch (err) {
         Toast.show('Erreur réseau lors du calcul', 'error');
         console.error(err);
       }
+    });
+  }
+
+  const $confidence = document.getElementById('confidence-min');
+  const $confidenceLabel = document.getElementById('confidence-min-label');
+  if ($confidence) {
+    $confidence.addEventListener('input', () => {
+      _confidenceMin = (parseInt($confidence.value, 10) || 0) / 100;
+      if ($confidenceLabel) $confidenceLabel.textContent = `${parseInt($confidence.value, 10) || 0} %`;
+      _render();
+    });
+  }
+
+  const $mergeBtn = document.getElementById('btn-merge-duplicates');
+  if ($mergeBtn) {
+    $mergeBtn.addEventListener('click', () => {
+      if (!window.GeoUtils || _detections.length < 2) return;
+      const before = _detections.length;
+      const merged = GeoUtils.mergeCloseDetections(_detections, 15);
+      const removed = before - merged.length;
+      if (window.MapController && window.MapController.displayDetectionsDirect) {
+        window.MapController.displayDetectionsDirect(merged);
+      } else {
+        setDetections(merged);
+      }
+      Toast.show(
+        removed > 0 ? `${removed} doublon(s) fusionné(s)` : 'Aucun doublon à moins de 15 m',
+        removed ? 'success' : 'info'
+      );
+    });
+  }
+
+  const $historyModal = document.getElementById('history-modal');
+  const $btnHistory = document.getElementById('btn-history');
+  const $btnCloseHistory = document.getElementById('btn-close-history');
+  const $btnExportHistory = document.getElementById('btn-export-history');
+  const $historyBody = document.getElementById('history-tbody');
+
+  async function renderHistory() {
+    if (!$historyBody || !window.solarAPI || !window.solarAPI.getHistory) return;
+    const rows = await window.solarAPI.getHistory();
+    if (!rows || !rows.length) {
+      $historyBody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:16px; color:#888;">Aucun devis enregistré pour le moment.</td></tr>';
+      return;
+    }
+    $historyBody.innerHTML = rows.map((row) => `
+      <tr>
+        <td>${escapeText(String(row.date || '').slice(0, 10))}</td>
+        <td>${escapeText(row.numero)}</td>
+        <td>${escapeText(row.client)}</td>
+        <td>${escapeText(row.adresse)}</td>
+        <td style="text-align:right;">${Number(row.prix_ttc || 0).toFixed(0)} €</td>
+      </tr>
+    `).join('');
+  }
+
+  if ($btnHistory) {
+    $btnHistory.addEventListener('click', async () => {
+      await renderHistory();
+      if ($historyModal) $historyModal.style.display = 'flex';
+    });
+  }
+  if ($btnCloseHistory) {
+    $btnCloseHistory.addEventListener('click', () => {
+      if ($historyModal) $historyModal.style.display = 'none';
+    });
+  }
+  if ($btnExportHistory) {
+    $btnExportHistory.addEventListener('click', async () => {
+      if (!window.solarAPI || !window.solarAPI.exportHistoryCSV) return;
+      const res = await window.solarAPI.exportHistoryCSV();
+      if (res.ok) Toast.show('Historique exporté', 'success');
+      else if (res.reason !== 'cancelled') Toast.show('Export impossible', 'error');
+    });
+  }
+
+  const $btnExportTour = document.getElementById('btn-export-tournee');
+  if ($btnExportTour) {
+    $btnExportTour.addEventListener('click', async () => {
+      if (!_tournee.length || !window.solarAPI) {
+        Toast.show('Ajoutez au moins un client à la tournée', 'warning');
+        return;
+      }
+      const html = window.PDFGenerator.buildTourSheet(_tournee, _tourneeSummary, _settings);
+      const res = await window.solarAPI.exportPDF(html, 'feuille_de_route.pdf');
+      if (res.ok) Toast.show('Feuille de route exportée', 'success');
+      else if (res.reason !== 'cancelled') Toast.show('Erreur PDF', 'error');
+    });
+  }
+
+  const $btnGmapsTour = document.getElementById('btn-gmaps-tournee');
+  if ($btnGmapsTour) {
+    $btnGmapsTour.addEventListener('click', () => {
+      const url = $btnGmapsTour.dataset.url || '';
+      if (url.startsWith('https://www.google.com/maps/')) window.open(url, '_blank');
     });
   }
 

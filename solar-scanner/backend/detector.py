@@ -1,8 +1,8 @@
 """
 detector.py — Pipeline de détection de panneaux solaires
 
-Mode 1 (ONNX) : si solar_detector.onnx est présent dans assets/model/
-Mode 2 (Heuristique MVP) : segmentation par couleur/texture (bleu foncé / gris-bleuté)
+Mode 1 (YOLO) : si solar_detector.pt est dans le dossier utilisateur
+Mode 2 (Heuristique) : couleur bleue sombre, plafonnée à 70 % de confiance
 
 Le pipeline retourne des détections GeoJSON-compatible.
 """
@@ -15,22 +15,20 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 from PIL import Image
-from scipy import ndimage
 
 from geo_utils import (
     pixels_to_m2,
     pixel_coords_to_geo,
-    resolution_at_zoom,
     geo_polygon_center,
 )
+from paths import resolve_model_path
 
 logger = logging.getLogger(__name__)
 
 # ── Model paths ────────────────────────────────────────────────────────────────
-MODEL_PATH = Path(__file__).parent.parent / "assets" / "model" / "solar_detector.pt"
-MIN_PANEL_AREA_PX = 400     # Filtre les trop petits objets (~6m² à zoom 19)
-MAX_PANEL_AREA_PX = 200_000  # Filtre les régions aberrantes
-CONFIDENCE_HEURISTIC = 0.65   # Confiance assignée au mode heuristique
+MIN_PANEL_AREA_PX = 400      # Filtre les trop petits objets
+MAX_PANEL_AREA_PX = 250_000  # Filtre les régions aberrantes (toits, routes)
+CONFIDENCE_HEURISTIC = 0.55  # Base du mode sans modèle (plafonnée à 0,70)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,26 +122,35 @@ class HeuristicDetector:
 
         h, w = img_bgr.shape[:2]
 
-        # ── Masque couleur PV ──────────────────────────────────────────────
-        # Bleu / Violet (tolérance totale sur Saturation et Luminosité)
-        mask_pv_blue = cv2.inRange(img_hsv,
-            np.array([70, 0, 0]),
-            np.array([160, 255, 255])
+        # ── Masque couleur PV (volontairement étroit) ──────────────────────
+        # Sans modèle, l'ancienne plage prenait presque tout le gris et le bleu
+        # de l'image (routes, toits clairs, ombres). On ne garde que :
+        #   - le silicium bleu sombre (pas le ciel, pas une piscine vive)
+        #   - le noir/gris très sombre, et seulement s'il tire vers le bleu
+        # La saturation peut être forte sur une cellule bleue nette.
+        # C'est le plafond de luminosité (V <= 130) qui écarte le ciel et les piscines.
+        mask_pv_blue = cv2.inRange(
+            img_hsv,
+            np.array([100, 35, 25]),
+            np.array([130, 255, 130]),
         )
 
-        # Gris / Noir / Blanc (toute teinte, mais saturation faible/moyenne < 85)
-        mask_dark_gray = cv2.inRange(img_hsv,
-            np.array([0, 0, 0]),
-            np.array([180, 85, 255])
+        mask_dark = cv2.inRange(
+            img_hsv,
+            np.array([0, 0, 15]),
+            np.array([180, 50, 90]),
         )
+        # Canal b LAB : 128 est neutre, en dessous c'est bleuté (pas une tuile rouge).
+        blueish = np.where(img_lab[:, :, 2] < 140, 255, 0).astype(np.uint8)
+        mask_dark = cv2.bitwise_and(mask_dark, blueish)
 
-        # Combine masks
-        mask_combined = cv2.bitwise_or(mask_pv_blue, mask_dark_gray)
-        
-        # ── EXCLUSION VEGETATION ───────────────────────────────────────────
-        # Rejeter l'herbe et les arbres (teinte verte / jaune-verte) avec une saturation > 40
-        mask_veg = cv2.inRange(img_hsv, np.array([35, 40, 0]), np.array([85, 255, 255]))
+        mask_combined = cv2.bitwise_or(mask_pv_blue, mask_dark)
+
+        # Végétation et surfaces claires (béton, toiture zinc, neige)
+        mask_veg = cv2.inRange(img_hsv, np.array([35, 40, 0]), np.array([95, 255, 255]))
+        mask_bright = cv2.inRange(img_hsv, np.array([0, 0, 150]), np.array([180, 80, 255]))
         mask_final = cv2.bitwise_and(mask_combined, cv2.bitwise_not(mask_veg))
+        mask_final = cv2.bitwise_and(mask_final, cv2.bitwise_not(mask_bright))
 
         # (On supprime le masque de texture car les grilles des gros panneaux créent trop de variance)
 
@@ -160,8 +167,7 @@ class HeuristicDetector:
         detections = []
         for cnt in contours:
             area_px = cv2.contourArea(cnt)
-            # Accepter les panneaux beaucoup plus grands (MAX 1_000_000)
-            if area_px < MIN_PANEL_AREA_PX or area_px > 1000000:
+            if area_px < MIN_PANEL_AREA_PX or area_px > MAX_PANEL_AREA_PX:
                 continue
 
             # Rectangularité (ratio aire réelle / aire minAreaRect orientée)
@@ -171,36 +177,40 @@ class HeuristicDetector:
             box_area = cv2.contourArea(box)
             rect_ratio = area_px / box_area if box_area > 0 else 0
 
-            # Si ce n'est pas très rectangulaire (ex: végétation résiduelle, ombres), on ignore
-            # Pour les grands panneaux, les ombres ou les découpes par la limite de la tuile déforment
-            # fortement la bounding box. On est très tolérant sur le ratio.
-            if area_px > 2000:
-                if rect_ratio < 0.30:
+            # Un panneau coupé par le bord de l'image est un peu moins rectangulaire,
+            # mais une route ou une ombre ne doit plus passer avec un seuil à 0,30.
+            if area_px > 8000:
+                if rect_ratio < 0.50:
                     continue
-            else:
-                if rect_ratio < 0.60:
-                    continue
+            elif rect_ratio < 0.62:
+                continue
 
             # Compacité (circulaire = 1, carré = ~0.785)
             perimeter = cv2.arcLength(cnt, True)
             compactness = (4 * math.pi * area_px) / (perimeter ** 2) if perimeter > 0 else 0
 
-            # Aspect ratio (les panneaux ont un ratio raisonnable)
+            # Aspect ratio (une route toute en longueur n'est pas un panneau)
             aspect = max(bw, bh) / max(min(bw, bh), 1)
-
-            # Score de confiance heuristique
-            conf = CONFIDENCE_HEURISTIC
-            if rect_ratio > 0.7:
-                conf = min(conf + 0.1, 0.88)
             if aspect > 5:
-                conf = max(conf - 0.15, 0.40)
+                continue
+
+            # Le mode heuristique ne doit jamais s'afficher comme une « haute
+            # confiance » : ce vert est réservé au modèle YOLO.
+            conf = CONFIDENCE_HEURISTIC
+            if rect_ratio > 0.75:
+                conf += 0.08
+            if 1.15 <= aspect <= 3.2:
+                conf += 0.05
             if area_px < 800:
-                conf = max(conf - 0.10, 0.40)
+                conf -= 0.08
+            conf = max(0.40, min(conf, 0.70))
 
             # Approx polygone
             epsilon = 0.02 * cv2.arcLength(cnt, True)
             approx = cv2.approxPolyDP(cnt, epsilon, True)
             poly_px = approx.squeeze().tolist()
+            if not poly_px:
+                continue
             if not isinstance(poly_px[0], list):
                 poly_px = [poly_px]  # Single point edge case
 
@@ -236,14 +246,20 @@ _yolo_detector: Optional[YoloDetector] = None
 _heuristic_detector = HeuristicDetector()
 
 
+def engine_name() -> str:
+    """'yolo' si le poids est chargé, sinon 'heuristique'."""
+    return "yolo" if _get_detector() else "heuristique"
+
+
 def _get_detector():
     global _yolo_detector
-    if MODEL_PATH.exists() and _yolo_detector is None:
+    model_file = resolve_model_path()
+    if model_file.exists() and _yolo_detector is None:
         try:
-            _yolo_detector = YoloDetector(MODEL_PATH)
-            logger.info("Using YOLOv8 detector")
+            _yolo_detector = YoloDetector(model_file)
+            logger.info("Détecteur YOLOv8 chargé")
         except Exception as e:
-            logger.warning(f"Failed to load YOLO model: {e}. Falling back to heuristic.")
+            logger.warning(f"Modèle YOLO illisible ({e}). Repli sur l'heuristique.")
             _yolo_detector = None
 
     return _yolo_detector if _yolo_detector else None

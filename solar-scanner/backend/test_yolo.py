@@ -1,9 +1,10 @@
 from ultralytics import YOLO
 import cv2
 import numpy as np
-from pathlib import Path
 
-MODEL_PATH = Path(__file__).parent.parent / "assets" / "model" / "solar_detector.pt"
+from paths import resolve_model_path
+
+MODEL_PATH = resolve_model_path()
 
 print("Loading model...")
 model = YOLO(str(MODEL_PATH))

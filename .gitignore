@@ -21,8 +21,9 @@ dist/
 .DS_Store
 Thumbs.db
 
-# App Assets
+# App Assets (données locales, pas le dépôt)
 solar-scanner/assets/cache/
 solar-scanner/assets/model/
+solar-scanner/assets/settings.json
 solar-scanner/backend/dist/
 solar-scanner/electron/dist/
