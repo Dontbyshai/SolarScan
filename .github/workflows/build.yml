@@ -31,10 +31,18 @@ jobs:
           cd solar-scanner/backend
           pip install -r requirements.txt
 
+      - name: Vérifier le moteur IA et les tests hors réseau
+        run: |
+          python -c "import cv2, ultralytics; print('OpenCV', cv2.__version__); print('Ultralytics', ultralytics.__version__)"
+          pip install httpx
+          cd solar-scanner/backend
+          python -m unittest test_v15.py
+          node ../frontend/test_v15.js
+
       - name: Build Python Backend Executable
         run: |
           cd solar-scanner/backend
-          pyinstaller --name solar_backend --onefile main.py
+          pyinstaller --noconfirm solar_backend.spec
           
       - name: Setup Node.js
         uses: actions/setup-node@v4

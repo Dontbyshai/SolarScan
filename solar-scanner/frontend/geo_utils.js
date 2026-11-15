@@ -121,6 +121,42 @@ window.GeoUtils = (() => {
     return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(eur);
   }
 
+  /** Distance en mètres entre deux centres {lat, lng}. */
+  function distanceMeters(a, b) {
+    if (!a || !b) return Infinity;
+    const R = 6371000;
+    const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+    const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+    const lat1 = (a.lat * Math.PI) / 180;
+    const lat2 = (b.lat * Math.PI) / 180;
+    const h = Math.sin(dLat / 2) ** 2
+      + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  /**
+   * Fusionne les détections dont les centres sont à moins de radiusM mètres.
+   * On garde la plus confiante (à confiance égale, la plus grande surface).
+   */
+  function mergeCloseDetections(detections, radiusM = 15) {
+    const list = Array.isArray(detections) ? detections.slice() : [];
+    const used = new Array(list.length).fill(false);
+    const order = list
+      .map((d, i) => ({ i, c: Number(d.confidence) || 0, a: Number(d.area_m2) || 0 }))
+      .sort((x, y) => (y.c - x.c) || (y.a - x.a));
+    const kept = [];
+    order.forEach(({ i }) => {
+      if (used[i]) return;
+      used[i] = true;
+      kept.push(list[i]);
+      for (let j = 0; j < list.length; j++) {
+        if (used[j]) continue;
+        if (distanceMeters(list[i].center, list[j].center) <= radiusM) used[j] = true;
+      }
+    });
+    return kept;
+  }
+
   return {
     resolutionAtZoom,
     pixelsToM2,
@@ -131,5 +167,7 @@ window.GeoUtils = (() => {
     tileCenter,
     formatArea,
     formatPrice,
+    distanceMeters,
+    mergeCloseDetections,
   };
 })();

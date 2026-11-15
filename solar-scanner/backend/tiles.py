@@ -8,8 +8,6 @@ Délai de 100ms entre les requêtes pour respecter le rate-limiting IGN.
 import asyncio
 import io
 import logging
-import math
-import os
 import sqlite3
 import time
 from pathlib import Path
@@ -18,32 +16,45 @@ from typing import Dict, List, Optional, Tuple
 import aiohttp
 from PIL import Image
 
-from geo_utils import tile_to_bounds, pixel_coords_to_geo
+from geo_utils import ign_tile_url, tile_to_bounds
+from paths import cache_dir
 
 logger = logging.getLogger(__name__)
 
 # ── Cache ──────────────────────────────────────────────────────────────────────
 
-CACHE_DIR = Path(__file__).parent.parent / "assets" / "cache"
-CACHE_DB_PATH = CACHE_DIR / "tiles.db"
 IGN_DELAY_SECS = 0.1  # 100ms entre requêtes IGN
+MAX_TILES_PER_REQUEST = 80
+MIN_ZOOM = 12
+MAX_ZOOM = 22
+ALLOWED_TILE_HOST = "data.geopf.fr"
 
 _db_conn: Optional[sqlite3.Connection] = None
+_db_path: Optional[Path] = None
+
+
+def cache_db_path() -> Path:
+    return cache_dir() / "tiles.db"
 
 
 def _get_db() -> sqlite3.Connection:
-    global _db_conn
-    if _db_conn is None:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _db_conn = sqlite3.connect(str(CACHE_DB_PATH), check_same_thread=False)
-        _db_conn.execute("""
-            CREATE TABLE IF NOT EXISTS tiles (
-                url     TEXT PRIMARY KEY,
-                data    BLOB NOT NULL,
-                created INTEGER NOT NULL
-            )
-        """)
-        _db_conn.commit()
+    global _db_conn, _db_path
+    path = cache_db_path()
+    if _db_conn is not None and _db_path == path:
+        return _db_conn
+    if _db_conn is not None:
+        _db_conn.close()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _db_conn = sqlite3.connect(str(path), check_same_thread=False)
+    _db_path = path
+    _db_conn.execute("""
+        CREATE TABLE IF NOT EXISTS tiles (
+            url     TEXT PRIMARY KEY,
+            data    BLOB NOT NULL,
+            created INTEGER NOT NULL
+        )
+    """)
+    _db_conn.commit()
     return _db_conn
 
 
@@ -83,15 +94,59 @@ def clear_tile_cache() -> int:
 
 def get_cache_size_mb() -> float:
     try:
-        return CACHE_DB_PATH.stat().st_size / (1024 * 1024) if CACHE_DB_PATH.exists() else 0.0
+        path = cache_db_path()
+        return path.stat().st_size / (1024 * 1024) if path.exists() else 0.0
     except Exception:
         return 0.0
+
+
+def sanitize_tiles(tile_infos: List[Dict]) -> List[Dict]:
+    """
+    Reconstruit chaque tuile à partir de x/y/z uniquement.
+
+    L'URL envoyée par l'interface est ignorée : le backend ne télécharge
+    que la tuile IGN canonique. Ça empêche de faire télécharger une adresse
+    arbitraire (fichier interne, autre site, etc.).
+    """
+    if len(tile_infos) > MAX_TILES_PER_REQUEST:
+        raise ValueError(
+            f"Trop de tuiles ({len(tile_infos)}). Maximum {MAX_TILES_PER_REQUEST}. Zoomez davantage."
+        )
+
+    cleaned: List[Dict] = []
+    for tile in tile_infos:
+        try:
+            z = int(tile["z"])
+            x = int(tile["x"])
+            y = int(tile["y"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("Tuile invalide : x, y et z sont requis")
+
+        if z < MIN_ZOOM or z > MAX_ZOOM:
+            raise ValueError(f"Zoom {z} hors plage ({MIN_ZOOM}–{MAX_ZOOM})")
+
+        limit = 2 ** z
+        if not (0 <= x < limit and 0 <= y < limit):
+            raise ValueError("Coordonnées de tuile hors grille")
+
+        url = ign_tile_url(x, y, z)
+        if ALLOWED_TILE_HOST not in url:
+            raise ValueError("Hôte de tuile non autorisé")
+
+        cleaned.append({
+            "x": x,
+            "y": y,
+            "z": z,
+            "url": url,
+            "bounds": tile_to_bounds(x, y, z),
+        })
+    return cleaned
 
 
 # ── HTTP Download ──────────────────────────────────────────────────────────────
 
 HEADERS = {
-    "User-Agent": "SolarScanner/1.0 (solar panel detection app; contact: admin@solarscanner.fr)",
+    "User-Agent": "SolarScan/1.5 (application locale ; https://github.com/Dontbyshai/SolarScan)",
     "Accept": "image/jpeg,image/*",
     "Referer": "https://www.geoportail.gouv.fr/",
 }
@@ -131,7 +186,8 @@ async def download_tiles_batch(
     results: Dict[str, bytes] = {}
     total = len(tile_infos)
 
-    connector = aiohttp.TCPConnector(limit=4, ssl=False)
+    # Vérification SSL laissée active : les tuiles IGN sont servies en HTTPS valide.
+    connector = aiohttp.TCPConnector(limit=4)
     async with aiohttp.ClientSession(connector=connector) as session:
         for i, tile in enumerate(tile_infos):
             url = tile["url"]

@@ -2,9 +2,9 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https: http://127.0.0.1:* http://localhost:*; img-src 'self' data: blob: https: http:; connect-src 'self' https: http://127.0.0.1:* http://localhost:*;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; img-src 'self' data: blob: solarscan: file: https://unpkg.com https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org https://data.geopf.fr https://tilecache.rainviewer.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:8765 https://api.rainviewer.com; frame-src https://maps.google.com https://www.google.com;" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Solar Scanner — Détection de Panneaux Solaires</title>
+  <title>SolarScan 1.5 — Détection de Panneaux Solaires</title>
   <meta name="description" content="Application de détection automatique de panneaux solaires par imagerie satellite IGN pour estimations de nettoyage." />
 
   <!-- Leaflet CSS (CDN) -->
@@ -53,7 +53,7 @@
   <header id="toolbar">
 
     <div class="toolbar-logo">
-      <img src="../assets/logo.png" alt="SolarScan" class="logo-image" />
+      <img src="solarscan://asset/logo.png" alt="SolarScan" class="logo-image" />
     </div>
 
     <div class="toolbar-divider"></div>
@@ -192,12 +192,20 @@
         </div>
       </div>
 
+      <div class="confidence-tools">
+        <label for="confidence-min">Confiance minimum : <strong id="confidence-min-label">0 %</strong></label>
+        <input type="range" id="confidence-min" min="0" max="90" step="5" value="0" />
+        <button class="btn btn-ghost" id="btn-merge-duplicates" type="button" disabled>
+          Fusionner les doublons
+        </button>
+      </div>
+
       <!-- Detection items list -->
       <div class="detection-list" id="detection-list">
         <div class="empty-state">
           <div class="empty-icon">🛰</div>
           <div class="empty-title">Aucune détection</div>
-          <div class="empty-desc">Activez le mode Auto (zoom ≥ 17 sur IGN) ou dessinez une zone avec le mode Zone.</div>
+          <div class="empty-desc">Cliquez sur Scanner (zoom ≥ 17, fond IGN) ou dessinez un panneau.</div>
         </div>
       </div>
 
@@ -230,6 +238,9 @@
           </button>
           <button class="btn btn-ghost" id="btn-export-csv" disabled title="Exporter en CSV">
             📊 CSV
+          </button>
+          <button class="btn btn-ghost" id="btn-history" title="Historique des devis">
+            🕘
           </button>
         </div>
         <button class="btn btn-accent" id="btn-export-pdf" style="width:100%; justify-content:center; margin-bottom: 8px;" disabled>
@@ -330,7 +341,7 @@
             </div>
             <div class="setting-row" style="margin-bottom: 0;">
               <label for="setting-max-tiles">Tuiles (Auto)</label>
-              <input type="number" id="setting-max-tiles" min="1" max="50" value="20" style="padding: 8px;" />
+              <input type="number" id="setting-max-tiles" min="1" max="80" value="20" style="padding: 8px;" />
             </div>
           </div>
           <h4 style="margin-top: 16px; margin-bottom: 12px; font-size: 13px; color: #333; text-transform: uppercase;">Rentabilité & Déplacement</h4>
@@ -350,6 +361,16 @@
             <div class="setting-row" style="margin-bottom: 0;">
               <label for="setting-mileage-cost">Frais (€/km)</label>
               <input type="number" id="setting-mileage-cost" step="0.05" value="0.5" style="padding: 8px;" />
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="setting-row" style="margin-bottom: 0;">
+              <label for="setting-validity">Validité du devis (jours)</label>
+              <input type="number" id="setting-validity" min="1" max="365" value="30" style="padding: 8px;" />
+            </div>
+            <div class="setting-row" style="margin-bottom: 0;">
+              <label for="setting-quote-next">Prochain n° de devis</label>
+              <input type="number" id="setting-quote-next" min="1" value="1" style="padding: 8px;" />
             </div>
           </div>
           
@@ -510,9 +531,41 @@
 
       <div class="modal-actions">
         <button class="btn btn-ghost" id="btn-close-tournee">Fermer</button>
-        <button class="btn btn-ghost" id="btn-gmaps-tournee" style="display: none; border-color: #4285F4; color: #4285F4;" onclick="window.open(this.dataset.url, '_blank')">Ouvrir dans Google Maps 🗺️</button>
+        <button class="btn btn-ghost" id="btn-export-tournee" type="button">📄 Feuille de route</button>
+        <button class="btn btn-ghost" id="btn-gmaps-tournee" type="button" style="display: none; border-color: #4285F4; color: #4285F4;">Ouvrir dans Google Maps 🗺️</button>
         <button class="btn btn-accent" id="btn-calc-tournee">Calculer l'itinéraire 🗺️</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Historique des devis -->
+  <div id="history-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="width: 720px; max-width: 95vw;">
+      <h3 style="margin-top: 0;">Historique des devis</h3>
+      <p style="margin-bottom: 12px; font-size: 12px; color: #666;">
+        Les devis générés sont conservés sur cet ordinateur. Rien n'est envoyé en ligne.
+      </p>
+      <div class="options-table-container" style="max-height: 320px; overflow: auto;">
+        <table class="options-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>N°</th>
+              <th>Client</th>
+              <th>Adresse</th>
+              <th style="text-align: right;">TTC</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions" style="margin-top: 16px;">
+        <button class="btn btn-ghost" id="btn-close-history">Fermer</button>
+        <button class="btn btn-accent" id="btn-export-history" type="button">Exporter en CSV</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Street View Modal -->
   <div class="modal-overlay" id="sv-modal" style="display: none; align-items: center; justify-content: center; z-index: 10000; padding: 20px;">
     <div style="background: white; border-radius: 8px; width: 100%; height: 100%; max-width: 1200px; max-height: 800px; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.5); overflow: hidden;">
@@ -535,6 +588,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 <script src="geo_utils.js"></script>
+<script src="api.js"></script>
 <script src="pdfTemplate.js"></script>
 <script src="sidebar.js"></script>
 <script src="draw.js"></script>
