@@ -1,0 +1,133 @@
+# Fabrique les installeurs macOS (.dmg) signés avec un certificat
+# « Developer ID Application » puis notarisés par Apple.
+#
+# Quand est-ce que ça tourne ?
+#   - à la main : onglet Actions > « Signature et notarisation macOS » > Run workflow
+#   - automatiquement : quand on pousse une étiquette (tag) du type v1.6.0
+#
+# Les mots de passe et le certificat ne sont PAS dans ce fichier.
+# Ils viennent uniquement des secrets GitHub (Settings > Secrets and variables > Actions).
+# Voir le guide : docs/signature-mac.md
+#
+# Le workflow habituel (build.yml) n'est pas modifié dans son rôle :
+# un push sur main continue de produire des builds de contrôle, non signés.
+
+name: Signature et notarisation macOS
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# « contents: write » sert uniquement à attacher le .dmg à une Release
+# GitHub quand le lancement vient d'un tag. Les artefacts du workflow
+# (onglet Actions) sont publiés dans tous les cas.
+permissions:
+  contents: write
+
+jobs:
+  build-mac-signe:
+    name: Construire et signer le .dmg
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      # On vérifie la présence des secrets SANS afficher leur contenu.
+      # Si un secret manque, autant s'arrêter tout de suite (sinon on
+      # fabriquerait un .dmg non signé en silence).
+      - name: Vérifier que les secrets Apple sont renseignés
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          manquant=0
+          for nom in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!nom}" ]; then
+              echo "Secret manquant : ${nom}"
+              manquant=1
+            fi
+          done
+          if [ "${manquant}" -ne 0 ]; then
+            echo "Ajoute les 5 secrets dans GitHub > Settings > Secrets and variables > Actions."
+            echo "Le détail des étapes est dans docs/signature-mac.md"
+            exit 1
+          fi
+          echo "Les 5 secrets sont présents (leur contenu n'est pas affiché)."
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Installer les dépendances Python et PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r solar-scanner/backend/requirements.txt
+
+      - name: Vérifier le moteur IA et les tests hors réseau
+        run: |
+          python -c "import cv2, ultralytics; print('OpenCV', cv2.__version__); print('Ultralytics', ultralytics.__version__)"
+          pip install httpx
+          cd solar-scanner/backend
+          python -m unittest test_v15.py
+          node ../frontend/test_v15.js
+
+      - name: Construire le moteur Python (exécutable)
+        run: |
+          cd solar-scanner/backend
+          pyinstaller --noconfirm solar_backend.spec
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: solar-scanner/electron/package-lock.json
+
+      - name: Installer les dépendances Node
+        working-directory: solar-scanner/electron
+        run: npm ci
+
+      # CSC_LINK = certificat .p12 encodé en base64
+      # CSC_KEY_PASSWORD = mot de passe de ce .p12
+      # APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID = compte Apple pour notarytool
+      # --publish never : empêche electron-builder de créer une release tout seul
+      # --arm64 --x64 : un .dmg pour les Mac Apple Silicon, un pour les Mac Intel
+      - name: Construire, signer et notariser les .dmg (arm64 et x64)
+        working-directory: solar-scanner/electron
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run build:mac:all
+
+      - name: Envoyer les .dmg comme artefacts du workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolarScanner-Mac-signe
+          path: solar-scanner/electron/dist/*.dmg
+          if-no-files-found: error
+
+      # Uniquement si ce lancement vient d'un tag (v1.6.0, etc.).
+      # Un lancement manuel (Run workflow) s'arrête aux artefacts ci-dessus :
+      # tu peux d'abord tester le .dmg, puis faire une release plus tard.
+      - name: Attacher les .dmg à la Release GitHub (uniquement pour un tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" solar-scanner/electron/dist/*.dmg --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" solar-scanner/electron/dist/*.dmg --generate-notes --title "$GITHUB_REF_NAME"
+          fi

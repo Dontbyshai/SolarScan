@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Autorisations (entitlements) demandées à macOS au moment de la signature.
+  Elles sont nécessaires pour le "Hardened Runtime", obligatoire pour la
+  notarisation Apple. On n'active PAS le bac à sable (App Sandbox), car
+  l'app n'est pas distribuée sur le Mac App Store.
+-->
+<plist version="1.0">
+  <dict>
+    <!-- Le moteur JavaScript d'Electron (V8) a besoin de compiler du code à la volée. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- Aussi requis par Electron / V8 sous Hardened Runtime. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!-- Le moteur Python (PyInstaller) est inclus dans l'app : sans ceci, macOS peut refuser de le charger. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- Accès Internet : cartes IGN, recherche d'adresse, etc. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Le moteur Python écoute en local sur 127.0.0.1:8765. -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+  </dict>
+</plist>

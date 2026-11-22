@@ -33,6 +33,16 @@
 
 ---
 
+## 💻 Télécharger l'application (macOS)
+
+Les installeurs officiels sont sur la [page des versions](https://github.com/Dontbyshai/SolarScan/releases).
+
+Si macOS refuse d'ouvrir le .dmg (« l'application n'est pas conforme » ou « impossible de l'ouvrir ») : **clic droit** sur Solar Scanner → **Ouvrir** → encore **Ouvrir**. Autre chemin : **Réglages Système** → **Confidentialité et sécurité** → **Ouvrir quand même**.
+
+Pour que ce message disparaisse pour tout le monde, l'app doit être signée et notarisée par Apple. Le mode d'emploi (certificat Developer ID, secrets GitHub, lancement du workflow) est dans [docs/signature-mac.md](docs/signature-mac.md).
+
+---
+
 ## 🚀 Installation & Lancement
 
 L'application est divisée en deux parties : un backend (Python) pour le moteur de détection et l'accès réseau, et un frontend (Electron) pour l'interface utilisateur.

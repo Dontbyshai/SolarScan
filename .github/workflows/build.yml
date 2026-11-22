@@ -1,3 +1,8 @@
+# Build de contrôle (Mac et Windows), déclenché à chaque push sur main.
+# Les .dmg produits ici ne sont pas signés. Pour un installeur Mac signé
+# et notarié par Apple, voir le workflow « Signature et notarisation macOS »
+# (.github/workflows/signature-mac.yml) et le guide docs/signature-mac.md.
+
 name: Build Solar Scanner (Mac & Windows)
 
 on:
