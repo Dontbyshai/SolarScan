@@ -1,6 +1,6 @@
 <div align="center">
   <img src="solar-scanner/assets/logo.png" alt="SolarScan Logo" width="250" />
-  <h1>SolarScan 1.5 🛰️☀️</h1>
+  <h1>SolarScan 1.5.1 🛰️☀️</h1>
   <p><strong>Logiciel professionnel de détection de panneaux solaires par imagerie satellite pour la facturation de nettoyage.</strong></p>
 </div>
 
@@ -33,7 +33,33 @@
 
 ---
 
-## 🚀 Installation & Lancement
+## 💻 Télécharger et installer (Windows et Mac)
+
+Les installeurs officiels sont sur la [page des versions](https://github.com/Dontbyshai/SolarScan/releases).
+
+### Windows
+
+Téléchargez le fichier `.exe` (par exemple `Solar Scanner Setup 1.5.1.exe`), lancez-le, puis ouvrez **Solar Scanner** depuis le menu Démarrer.
+
+### macOS
+
+1. Téléchargez le fichier `.dmg`, ouvrez-le, et glissez **Solar Scanner** dans le dossier **Applications**.
+2. Si macOS dit que l'application **n'est pas conforme**, faites un **clic droit** sur Solar Scanner dans Applications, choisissez **Ouvrir**, puis encore **Ouvrir**.
+3. Si macOS dit que l'application est **endommagée**, n'allez pas à la corbeille. Ouvrez le **Terminal**, copiez cette commande, puis appuyez sur Entrée :
+
+```bash
+xattr -cr "/Applications/Solar Scanner.app"
+```
+
+Ensuite, refaites un **clic droit** sur l'application, puis **Ouvrir**.
+
+Vous n'avez à faire cela qu'une seule fois, jusqu'à la prochaine installation.
+
+Pourquoi ce message ? L'application n'est pas encore signée par Apple. Quand vous la téléchargez (par exemple avec Chrome), macOS colle une étiquette « vient d'Internet ». Sans signature Apple, cette étiquette fait croire que l'app est endommagée, alors qu'elle ne l'est pas. La commande `xattr` enlève seulement cette étiquette.
+
+---
+
+## 🚀 Installation & Lancement (développement)
 
 L'application est divisée en deux parties : un backend (Python) pour le moteur de détection et l'accès réseau, et un frontend (Electron) pour l'interface utilisateur.
 
