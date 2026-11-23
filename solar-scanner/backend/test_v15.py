@@ -110,7 +110,8 @@ class CacheTests(unittest.TestCase):
 
 
 class HeuristicTests(unittest.TestCase):
-    def test_panneau_bleu_seulement(self):
+    def test_panneau_bleu_detecte(self):
+        """L'heuristique V1 doit au moins trouver le rectangle bleu PV."""
         img = Image.new("RGB", (320, 320), (46, 140, 52))
         px = img.load()
         for x in range(40, 130):
@@ -124,9 +125,21 @@ class HeuristicTests(unittest.TestCase):
                 px[x, y] = (42, 42, 46)
 
         found = HeuristicDetector().detect(img)
-        self.assertEqual(len(found), 1, f"détections inattendues : {len(found)}")
-        self.assertLessEqual(found[0]["confidence"], 0.70)
-        self.assertGreaterEqual(found[0]["area_px"], 400)
+        self.assertGreaterEqual(len(found), 1, "aucun panneau détecté")
+        hits_blue = 0
+        for det in found:
+            x, y, bw, bh = det["bbox"]
+            if x <= 85 <= x + bw and y <= 75 <= y + bh:
+                hits_blue += 1
+                self.assertGreaterEqual(det["area_px"], 400)
+                self.assertGreaterEqual(det["confidence"], 0.40)
+                self.assertLessEqual(det["confidence"], 0.88)
+        self.assertGreaterEqual(hits_blue, 1, "le rectangle bleu n'a pas été trouvé")
+
+    def test_poids_yolo_embarque(self):
+        path = Path(__file__).resolve().parent.parent / "assets" / "model" / "solar_detector.pt"
+        self.assertTrue(path.is_file(), f"modèle manquant : {path}")
+        self.assertGreater(path.stat().st_size, 1_000_000)
 
 
 class ApiTests(unittest.TestCase):
@@ -170,6 +183,7 @@ class SpecTests(unittest.TestCase):
         self.assertIn("collect_all", text)
         self.assertIn("certifi", text)
         self.assertIn("collect_data_files", text)
+        self.assertIn("solar_detector.pt", text)
 
 
 

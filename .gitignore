@@ -23,7 +23,8 @@ Thumbs.db
 
 # App Assets (données locales, pas le dépôt)
 solar-scanner/assets/cache/
-solar-scanner/assets/model/
+solar-scanner/assets/model/*
+!solar-scanner/assets/model/solar_detector.pt
 solar-scanner/assets/settings.json
 solar-scanner/backend/dist/
 solar-scanner/electron/dist/

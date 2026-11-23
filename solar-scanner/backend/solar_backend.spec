@@ -2,10 +2,12 @@
 """
 Build PyInstaller du moteur SolarScan.
 
-Embarque OpenCV et Ultralytics (le code du moteur). Les poids YOLO ne sont
-pas inclus : ils se téléchargent avec download_model.py dans le dossier
-utilisateur, pour rester inscriptibles une fois l'application installée.
+Embarque OpenCV, Ultralytics et le poids YOLO (solar_detector.pt).
+Une copie est ensuite placée dans le dossier utilisateur, inscriptible.
 """
+
+import os
+from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
@@ -56,6 +58,13 @@ hiddenimports += collect_submodules("ultralytics")
 # cacert.pem : sans ce fichier, le contexte SSL de http_ssl.py
 # ne trouve aucune autorité dans l'exécutable gelé.
 datas += collect_data_files("certifi")
+
+# Poids YOLOv8 (finloop/yolov8s-seg-solar-panels) : sans lui, /health
+# annonce « heuristique » et le scan est beaucoup moins fiable.
+_model = Path(SPEC).resolve().parent.parent / "assets" / "model" / "solar_detector.pt"
+if not _model.is_file():
+    raise SystemExit(f"Modèle YOLO manquant : {_model}")
+datas += [(str(_model), "model")]
 
 a = Analysis(
     ["main.py"],

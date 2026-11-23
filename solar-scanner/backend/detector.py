@@ -1,8 +1,10 @@
 """
 detector.py — Pipeline de détection de panneaux solaires
 
-Mode 1 (YOLO) : si solar_detector.pt est dans le dossier utilisateur
-Mode 2 (Heuristique) : couleur bleue sombre, plafonnée à 70 % de confiance
+Mode 1 (YOLO) : solar_detector.pt est embarqué dans l'application
+  (finloop/yolov8s-seg-solar-panels) et recopié dans le dossier utilisateur.
+Mode 2 (Heuristique V1) : si le modèle ne charge pas, masque couleur large
+  comme dans SolarScan 1.0 (bleu + gris), qui détectait bien les panneaux.
 
 Le pipeline retourne des détections GeoJSON-compatible.
 """
@@ -26,9 +28,9 @@ from paths import resolve_model_path
 logger = logging.getLogger(__name__)
 
 # ── Model paths ────────────────────────────────────────────────────────────────
-MIN_PANEL_AREA_PX = 400      # Filtre les trop petits objets
-MAX_PANEL_AREA_PX = 250_000  # Filtre les régions aberrantes (toits, routes)
-CONFIDENCE_HEURISTIC = 0.55  # Base du mode sans modèle (plafonnée à 0,70)
+MIN_PANEL_AREA_PX = 400      # Filtre les trop petits objets (~6m² à zoom 19)
+MAX_PANEL_AREA_PX = 200_000  # Filtre les régions aberrantes (comme V1)
+CONFIDENCE_HEURISTIC = 0.65  # Confiance de base du mode heuristique V1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -122,35 +124,24 @@ class HeuristicDetector:
 
         h, w = img_bgr.shape[:2]
 
-        # ── Masque couleur PV (volontairement étroit) ──────────────────────
-        # Sans modèle, l'ancienne plage prenait presque tout le gris et le bleu
-        # de l'image (routes, toits clairs, ombres). On ne garde que :
-        #   - le silicium bleu sombre (pas le ciel, pas une piscine vive)
-        #   - le noir/gris très sombre, et seulement s'il tire vers le bleu
-        # La saturation peut être forte sur une cellule bleue nette.
-        # C'est le plafond de luminosité (V <= 130) qui écarte le ciel et les piscines.
-        mask_pv_blue = cv2.inRange(
-            img_hsv,
-            np.array([100, 35, 25]),
-            np.array([130, 255, 130]),
+        # ── Masque couleur PV (V1) ───────────────────────────────────────
+        # Bleu / Violet (tolérance totale sur Saturation et Luminosité)
+        mask_pv_blue = cv2.inRange(img_hsv,
+            np.array([70, 0, 0]),
+            np.array([160, 255, 255])
         )
 
-        mask_dark = cv2.inRange(
-            img_hsv,
-            np.array([0, 0, 15]),
-            np.array([180, 50, 90]),
+        # Gris / Noir / Blanc (toute teinte, mais saturation faible/moyenne < 85)
+        mask_dark_gray = cv2.inRange(img_hsv,
+            np.array([0, 0, 0]),
+            np.array([180, 85, 255])
         )
-        # Canal b LAB : 128 est neutre, en dessous c'est bleuté (pas une tuile rouge).
-        blueish = np.where(img_lab[:, :, 2] < 140, 255, 0).astype(np.uint8)
-        mask_dark = cv2.bitwise_and(mask_dark, blueish)
 
-        mask_combined = cv2.bitwise_or(mask_pv_blue, mask_dark)
+        mask_combined = cv2.bitwise_or(mask_pv_blue, mask_dark_gray)
 
-        # Végétation et surfaces claires (béton, toiture zinc, neige)
-        mask_veg = cv2.inRange(img_hsv, np.array([35, 40, 0]), np.array([95, 255, 255]))
-        mask_bright = cv2.inRange(img_hsv, np.array([0, 0, 150]), np.array([180, 80, 255]))
+        # ── EXCLUSION VEGETATION ───────────────────────────────────────────
+        mask_veg = cv2.inRange(img_hsv, np.array([35, 40, 0]), np.array([85, 255, 255]))
         mask_final = cv2.bitwise_and(mask_combined, cv2.bitwise_not(mask_veg))
-        mask_final = cv2.bitwise_and(mask_final, cv2.bitwise_not(mask_bright))
 
         # (On supprime le masque de texture car les grilles des gros panneaux créent trop de variance)
 
@@ -167,7 +158,8 @@ class HeuristicDetector:
         detections = []
         for cnt in contours:
             area_px = cv2.contourArea(cnt)
-            if area_px < MIN_PANEL_AREA_PX or area_px > MAX_PANEL_AREA_PX:
+            # V1 : accepter les grands champs (MAX 1_000_000), pas seulement 250k.
+            if area_px < MIN_PANEL_AREA_PX or area_px > 1_000_000:
                 continue
 
             # Rectangularité (ratio aire réelle / aire minAreaRect orientée)
@@ -177,33 +169,30 @@ class HeuristicDetector:
             box_area = cv2.contourArea(box)
             rect_ratio = area_px / box_area if box_area > 0 else 0
 
-            # Un panneau coupé par le bord de l'image est un peu moins rectangulaire,
-            # mais une route ou une ombre ne doit plus passer avec un seuil à 0,30.
-            if area_px > 8000:
-                if rect_ratio < 0.50:
+            # Pour les grands panneaux, les ombres ou les découpes par la limite
+            # de la tuile déforment la boîte. On est tolérant sur le ratio (V1).
+            if area_px > 2000:
+                if rect_ratio < 0.30:
                     continue
-            elif rect_ratio < 0.62:
-                continue
+            else:
+                if rect_ratio < 0.60:
+                    continue
 
             # Compacité (circulaire = 1, carré = ~0.785)
             perimeter = cv2.arcLength(cnt, True)
             compactness = (4 * math.pi * area_px) / (perimeter ** 2) if perimeter > 0 else 0
 
-            # Aspect ratio (une route toute en longueur n'est pas un panneau)
+            # Aspect ratio (les panneaux ont un ratio raisonnable)
             aspect = max(bw, bh) / max(min(bw, bh), 1)
-            if aspect > 5:
-                continue
 
-            # Le mode heuristique ne doit jamais s'afficher comme une « haute
-            # confiance » : ce vert est réservé au modèle YOLO.
+            # Score de confiance heuristique V1 (peut monter à 0,88)
             conf = CONFIDENCE_HEURISTIC
-            if rect_ratio > 0.75:
-                conf += 0.08
-            if 1.15 <= aspect <= 3.2:
-                conf += 0.05
+            if rect_ratio > 0.7:
+                conf = min(conf + 0.1, 0.88)
+            if aspect > 5:
+                conf = max(conf - 0.15, 0.40)
             if area_px < 800:
-                conf -= 0.08
-            conf = max(0.40, min(conf, 0.70))
+                conf = max(conf - 0.10, 0.40)
 
             # Approx polygone
             epsilon = 0.02 * cv2.arcLength(cnt, True)
