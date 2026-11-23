@@ -87,7 +87,7 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["version"], "1.5.0")
+        self.assertEqual(body["version"], "1.5.1")
         self.assertIn(body["engine"], ("yolo", "heuristique"))
 
     def test_analyse_exige_le_jeton(self):

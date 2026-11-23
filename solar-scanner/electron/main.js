@@ -10,7 +10,6 @@ const http = require('http');
 const BACKEND_PORT = 8765;
 const IS_DEV = process.argv.includes('--dev');
 const ROOT_DIR = path.join(__dirname, '..');
-const FRONTEND_DIR = path.join(ROOT_DIR, 'frontend');
 const API_TOKEN = crypto.randomBytes(32).toString('hex');
 const MAX_SETTINGS_BYTES = 2_500_000;
 const MAX_PROJECT_BYTES = 8_000_000;
@@ -37,6 +36,62 @@ function assetsDir() {
     process.resourcesPath ? path.join(process.resourcesPath, 'assets') : '',
   ].filter(Boolean);
   return candidates.find((dir) => fs.existsSync(dir)) || candidates[0];
+}
+
+function frontendDir() {
+  const candidates = [
+    path.join(ROOT_DIR, 'frontend'),
+    process.resourcesPath ? path.join(process.resourcesPath, 'frontend') : '',
+    path.join(__dirname, 'frontend'),
+  ].filter(Boolean);
+  return candidates.find((dir) => fs.existsSync(path.join(dir, 'index.html'))) || candidates[0];
+}
+
+function interfaceErrorHtml(message) {
+  const safe = String(message || 'Fichier introuvable')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>SolarScan — interface introuvable</title>
+  <style>
+    body { margin: 0; background: #0d1117; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    main { max-width: 520px; padding: 32px; }
+    h1 { font-size: 22px; margin: 0 0 12px; }
+    p { line-height: 1.5; color: #9ba3af; }
+    code { display: block; margin-top: 16px; padding: 12px; background: #161b22; border-radius: 8px; color: #f0883e; word-break: break-all; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Impossible d'ouvrir l'interface</h1>
+    <p>SolarScan a démarré, mais la page de l'application est introuvable. Réinstallez l'application, puis relancez-la. Si le problème continue, contactez l'éditeur.</p>
+    <code>${safe}</code>
+  </main>
+</body>
+</html>`;
+}
+
+async function showInterfaceError(win, message) {
+  console.error("[Electron] Chargement de l'interface :", message);
+  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(interfaceErrorHtml(message)));
+  if (!win.isVisible()) win.show();
+}
+
+async function loadInterface(win) {
+  const indexPath = path.join(frontendDir(), 'index.html');
+  if (!fs.existsSync(indexPath)) {
+    await showInterfaceError(win, 'Interface introuvable : ' + indexPath);
+    return;
+  }
+  try {
+    await win.loadFile(indexPath);
+  } catch (err) {
+    await showInterfaceError(win, err.message);
+  }
 }
 
 function userDataDir() {
@@ -215,10 +270,16 @@ async function createWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith('file://')) event.preventDefault();
+    if (!url.startsWith('file://') && !url.startsWith('data:')) event.preventDefault();
   });
 
-  await mainWindow.loadFile(path.join(FRONTEND_DIR, 'index.html'));
+  mainWindow.webContents.on('did-fail-load', async (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return;
+    if (String(validatedURL || '').startsWith('data:')) return;
+    await showInterfaceError(mainWindow, `${errorDescription} (${validatedURL})`);
+  });
+
+  await loadInterface(mainWindow);
 
   if (IS_DEV) mainWindow.webContents.openDevTools({ mode: 'detach' });
 
