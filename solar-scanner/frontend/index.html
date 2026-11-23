@@ -15,6 +15,13 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+<script>
+  (function () {
+    var mac = /Mac|iPhone|iPad/.test(navigator.platform || '') || /Mac OS X/.test(navigator.userAgent || '');
+    var electron = /Electron/i.test(navigator.userAgent || '');
+    if (mac && electron) document.documentElement.classList.add('is-mac-electron');
+  })();
+</script>
 
 <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
   <symbol id="i-map" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></symbol>
@@ -190,7 +197,7 @@
             <div class="stat-label">Surface totale</div>
             <div class="stat-value" id="stat-area">0<span class="stat-unit">m²</span></div>
           </div>
-          <div class="stat-card" style="grid-column: 1 / -1;">
+          <div class="stat-card stat-wide">
             <div class="stat-label">Estimation nettoyage HT</div>
             <div class="stat-value" id="stat-price">0<span class="stat-unit">€</span></div>
           </div>
@@ -200,58 +207,60 @@
       <div class="confidence-tools">
         <label for="confidence-min">Confiance minimum : <strong id="confidence-min-label">0 %</strong></label>
         <input type="range" id="confidence-min" min="0" max="90" step="5" value="0" />
-        <button class="btn btn-ghost" id="btn-merge-duplicates" type="button" disabled>
+        <button class="btn btn-secondary" id="btn-merge-duplicates" type="button" disabled title="Fusionner les détections à moins de 15 m">
           Fusionner les doublons
         </button>
       </div>
 
-      <!-- Detection items list -->
-      <div class="detection-list" id="detection-list">
-        <div class="empty-state">
-          <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-satellite"></use></svg></div>
-          <div class="empty-title">Aucune détection</div>
-          <div class="empty-desc">Cliquez sur Scanner (zoom ≥ 17, fond IGN) ou dessinez un panneau.</div>
+      <div class="sidebar-body">
+        <div class="detection-list" id="detection-list">
+          <div class="empty-state">
+            <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-satellite"></use></svg></div>
+            <div class="empty-title">Aucune détection</div>
+            <div class="empty-desc">Cliquez sur Scanner (zoom ≥ 17, fond IGN) ou dessinez un panneau.</div>
+          </div>
         </div>
+        <div id="business-options-container" class="business-options-container"></div>
       </div>
 
-      <!-- Business Options -->
-      <div id="business-options-container" class="business-options-container">
-        <!-- Rendered via JS -->
-      </div>
-      
-      <!-- Tournée Header -->
-      <div style="padding: 10px 15px; border-bottom: 1px solid var(--border-light); background: var(--surface); display: flex; gap: 8px;">
-        <button class="btn btn-ghost" id="btn-add-tournee-quick" title="Ajouter le scan actuel à la tournée" style="padding: 0 12px; border: 1px solid var(--accent); color: var(--accent);">
+      <div class="tournee-row">
+        <button class="btn btn-ghost" id="btn-add-tournee-quick" title="Ajouter le scan actuel à la tournée">
           <svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>
+          <span>Ajouter</span>
         </button>
-        <button class="btn btn-accent" id="btn-open-tournee" style="flex: 1; justify-content: center;">
+        <button class="btn btn-accent" id="btn-open-tournee">
           <svg class="icon" aria-hidden="true"><use href="#i-route"></use></svg> Ma Tournée (0)
         </button>
       </div>
 
       <!-- Export footer -->
       <div class="sidebar-footer">
-        <div class="export-row" style="margin-bottom: 8px;">
+        <div class="export-row">
           <button class="btn btn-ghost" id="btn-save-project" title="Sauvegarder le projet (.solar)">
             <svg class="icon" aria-hidden="true"><use href="#i-save"></use></svg>
+            <span>Sauver</span>
           </button>
           <button class="btn btn-ghost" id="btn-open-project" title="Ouvrir un projet (.solar)">
             <svg class="icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
+            <span>Ouvrir</span>
           </button>
-          <button class="btn btn-ghost" id="btn-manage-options">
-            <svg class="icon" aria-hidden="true"><use href="#i-sliders"></use></svg> Options
+          <button class="btn btn-ghost" id="btn-manage-options" title="Options d'intervention">
+            <svg class="icon" aria-hidden="true"><use href="#i-sliders"></use></svg>
+            <span>Options</span>
           </button>
           <button class="btn btn-ghost" id="btn-export-csv" disabled title="Exporter en CSV">
-            <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg> CSV
+            <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
+            <span>CSV</span>
           </button>
           <button class="btn btn-ghost" id="btn-history" title="Historique des devis">
             <svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg>
+            <span>Historique</span>
           </button>
         </div>
-        <button class="btn btn-accent" id="btn-export-pdf" style="width:100%; justify-content:center; margin-bottom: 8px;" disabled>
+        <button class="btn btn-accent btn-block" id="btn-export-pdf" disabled>
           <svg class="icon" aria-hidden="true"><use href="#i-invoice"></use></svg> Générer le devis
         </button>
-        <button class="btn btn-danger" id="btn-clear-results" style="width:100%; justify-content:center;" disabled>
+        <button class="btn btn-danger btn-block" id="btn-clear-results" disabled>
           <svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg> Effacer les résultats
         </button>
       </div>

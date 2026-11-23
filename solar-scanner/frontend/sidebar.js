@@ -395,7 +395,7 @@ window.Sidebar = (() => {
     }
     
     if ($businessOptionsContainer) {
-      let html = '<div style="font-size: 13px; font-weight: 600; color: #a1a1aa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Options d\'intervention</div>';
+      let html = '<div class="business-options-title">Options d\'intervention</div>';
       
       _businessOptions.forEach((opt, idx) => {
         html += `
