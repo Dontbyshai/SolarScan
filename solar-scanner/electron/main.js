@@ -14,6 +14,9 @@ const API_TOKEN = crypto.randomBytes(32).toString('hex');
 const MAX_SETTINGS_BYTES = 2_500_000;
 const MAX_PROJECT_BYTES = 8_000_000;
 const HISTORY_LIMIT = 200;
+// Un capture Rétina + logo base64 (parfois doublé) dépasse facilement 6 Mo.
+// L'ancienne limite rejetait le 2e devis sans rien écrire dans les journaux.
+const MAX_PDF_HTML_CHARS = 40_000_000;
 
 // Même nom que le repli Python (paths.py) : le dossier reste stable.
 app.setName('SolarScan');
@@ -106,6 +109,22 @@ function settingsPath() {
 
 function historyPath() {
   return path.join(userDataDir(), 'historique.json');
+}
+
+function electronLogPath() {
+  return path.join(userDataDir(), 'electron.log');
+}
+
+function electronLog(level, message, extra) {
+  const suffix = extra !== undefined && extra !== '' ? ' ' + String(extra) : '';
+  const line = new Date().toISOString() + ' [' + level + '] ' + String(message) + suffix + '\n';
+  if (level === 'ERROR') console.error(String(message), extra !== undefined ? extra : '');
+  else console.log(String(message), extra !== undefined ? extra : '');
+  try {
+    fs.appendFileSync(electronLogPath(), line, 'utf-8');
+  } catch (err) {
+    console.error('Impossible d\'écrire electron.log :', err.message);
+  }
 }
 
 function readJson(filePath, fallback) {
@@ -500,19 +519,15 @@ ipcMain.handle('export-csv', async (_, rows) => {
   return { ok: true, filePath };
 });
 
-ipcMain.handle('export-pdf', async (_, htmlContent, suggestedName) => {
-  if (typeof htmlContent !== 'string' || htmlContent.length > 6_000_000) {
-    return { ok: false, reason: 'Document invalide' };
-  }
-  const safeName = typeof suggestedName === 'string'
-    ? suggestedName.replace(/[^\w.\- ]+/g, '').slice(0, 80)
-    : '';
-  const { filePath } = await dialog.showSaveDialog(mainWindow, {
-    defaultPath: safeName || `devis_panneaux_${Date.now()}.pdf`,
-    filters: [{ name: 'PDF', extensions: ['pdf'] }],
-  });
-  if (!filePath) return { ok: false, reason: 'cancelled' };
+let pdfExportChain = Promise.resolve();
 
+function looksLikePdfPath(filePath) {
+  if (typeof filePath !== 'string' || !filePath) return false;
+  const resolved = path.resolve(filePath);
+  return path.extname(resolved).toLowerCase() === '.pdf';
+}
+
+async function exportPdfToFile(htmlContent, filePath) {
   let pdfWin = null;
   let tempPath = '';
   try {
@@ -526,10 +541,24 @@ ipcMain.handle('export-pdf', async (_, htmlContent, suggestedName) => {
       },
     });
 
-    tempPath = path.join(app.getPath('temp'), `pdf_temp_${Date.now()}.html`);
+    tempPath = path.join(app.getPath('temp'), `pdf_temp_${Date.now()}_${Math.random().toString(16).slice(2)}.html`);
     fs.writeFileSync(tempPath, htmlContent, 'utf-8');
-    await pdfWin.loadFile(tempPath);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve(), 8000);
+      pdfWin.webContents.once('did-finish-load', () => {
+        clearTimeout(timer);
+        setTimeout(resolve, 250);
+      });
+      pdfWin.webContents.once('did-fail-load', (_event, code, desc) => {
+        clearTimeout(timer);
+        reject(new Error(desc || ('Chargement du document échoué (' + code + ')')));
+      });
+      pdfWin.loadFile(tempPath).catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
 
     const pdfData = await pdfWin.webContents.printToPDF({
       printBackground: true,
@@ -538,15 +567,101 @@ ipcMain.handle('export-pdf', async (_, htmlContent, suggestedName) => {
     });
 
     fs.writeFileSync(filePath, Buffer.from(pdfData));
-    shell.showItemInFolder(filePath);
     return { ok: true, filePath };
-  } catch (err) {
-    console.error('Erreur PDF :', err);
-    dialog.showErrorBox('Erreur PDF', 'Impossible de créer le PDF : ' + err.message);
-    return { ok: false, reason: err.message };
   } finally {
-    if (pdfWin) pdfWin.close();
-    if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    if (pdfWin && !pdfWin.isDestroyed()) {
+      pdfWin.destroy();
+    }
+    if (tempPath && fs.existsSync(tempPath)) {
+      try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+    }
+  }
+}
+
+async function handleExportPdf(htmlContent, suggestedName) {
+  if (typeof htmlContent !== 'string') {
+    electronLog('ERROR', 'export-pdf: le document n\'est pas une chaîne');
+    return { ok: false, reason: 'Document invalide' };
+  }
+  electronLog('INFO', 'export-pdf: génération demandée (' + htmlContent.length + ' car., nom=' + String(suggestedName || '') + ')');
+  if (htmlContent.length > MAX_PDF_HTML_CHARS) {
+    const reason = 'Document trop volumineux (' + Math.round(htmlContent.length / 1e6) + ' Mo)';
+    electronLog('ERROR', 'export-pdf: ' + reason);
+    return { ok: false, reason };
+  }
+  const safeName = typeof suggestedName === 'string'
+    ? suggestedName.replace(/[^\w.\- ]+/g, '').slice(0, 80)
+    : '';
+  const defaultDir = app.getPath('documents') || app.getPath('home') || '';
+  const defaultPath = path.join(defaultDir, safeName || ('devis_panneaux_' + Date.now() + '.pdf'));
+  const { filePath } = await dialog.showSaveDialog(mainWindow, {
+    defaultPath,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (!filePath) return { ok: false, reason: 'cancelled' };
+
+  try {
+    const result = await exportPdfToFile(htmlContent, filePath);
+    electronLog('INFO', 'export-pdf: écrit ' + filePath);
+    shell.showItemInFolder(filePath);
+    return result;
+  } catch (err) {
+    electronLog('ERROR', 'export-pdf: ' + err.message, err.stack || '');
+    return { ok: false, reason: err.message || 'Impossible de créer le PDF' };
+  }
+}
+
+ipcMain.handle('export-pdf', async (_, htmlContent, suggestedName) => {
+  const run = pdfExportChain.then(
+    () => handleExportPdf(htmlContent, suggestedName),
+    () => handleExportPdf(htmlContent, suggestedName),
+  );
+  pdfExportChain = run.then(() => undefined, () => undefined);
+  return run;
+});
+
+ipcMain.handle('log-error', (_, message, detail) => {
+  electronLog('ERROR', String(message || 'erreur renderer'), detail ? String(detail).slice(0, 4000) : '');
+  return { ok: true };
+});
+
+ipcMain.handle('open-history-file', async (_, filePath) => {
+  if (!looksLikePdfPath(filePath)) {
+    return { ok: false, reason: 'Fichier PDF invalide' };
+  }
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    return { ok: false, reason: 'Fichier introuvable (déplacé ou supprimé)' };
+  }
+  const err = await shell.openPath(resolved);
+  if (err) {
+    electronLog('ERROR', 'open-history-file: ' + err);
+    return { ok: false, reason: err };
+  }
+  return { ok: true };
+});
+
+ipcMain.handle('reexport-history-file', async (_, filePath) => {
+  if (!looksLikePdfPath(filePath)) {
+    return { ok: false, reason: 'Fichier PDF invalide' };
+  }
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    return { ok: false, reason: 'Fichier introuvable (déplacé ou supprimé)' };
+  }
+  const { filePath: dest } = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: path.join(app.getPath('documents'), path.basename(resolved)),
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (!dest) return { ok: false, reason: 'cancelled' };
+  try {
+    fs.copyFileSync(resolved, dest);
+    shell.showItemInFolder(dest);
+    electronLog('INFO', 'reexport-history-file: ' + dest);
+    return { ok: true, filePath: dest };
+  } catch (err) {
+    electronLog('ERROR', 'reexport-history-file: ' + err.message);
+    return { ok: false, reason: err.message };
   }
 });
 

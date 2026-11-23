@@ -65,6 +65,23 @@ window.Sidebar = (() => {
     return conf + 1e-9 >= _confidenceMin;
   }
 
+  function exportFailToast(prefix, resOrErr) {
+    const reason = (resOrErr && (resOrErr.reason || resOrErr.message))
+      ? String(resOrErr.reason || resOrErr.message)
+      : 'erreur inconnue';
+    const msg = prefix + ' : ' + reason;
+    Toast.show(msg, 'error', 7000);
+    if (window.solarAPI && window.solarAPI.logError) {
+      window.solarAPI.logError(msg, resOrErr && resOrErr.stack ? String(resOrErr.stack) : '');
+    } else {
+      console.error(msg, resOrErr);
+    }
+  }
+
+  function iconSvg(name) {
+    return '<svg class="icon" aria-hidden="true"><use href="#i-' + name + '"></use></svg>';
+  }
+
   function quoteTotals(list) {
     const area = list.reduce((s, d) => s + d.area_m2, 0);
     let ht = list.reduce((s, d) => s + computeEstimate(d.area_m2).price_ht, 0);
@@ -433,7 +450,7 @@ window.Sidebar = (() => {
     if (!hasResults) {
       $list.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">🛰</div>
+          <div class="empty-icon">${iconSvg('satellite')}</div>
           <div class="empty-title">Aucune détection</div>
           <div class="empty-desc">Cliquez sur Scanner (zoom ≥ 17, fond IGN) ou dessinez un panneau.</div>
         </div>`;
@@ -459,12 +476,12 @@ window.Sidebar = (() => {
             <input type="text" class="detection-label-input" data-idx="${i}" value="${escapeText(label)}" />
             <div class="detection-area">${d.area_m2.toFixed(1)} m²</div>
             <div class="detection-meta">
-              <span>🎯 ${confLabel} (${(conf * 100).toFixed(0)}%)${below ? ' · sous le seuil' : ''}</span>
-              <span>📍 ${d.center ? d.center.lat.toFixed(5) + ', ' + d.center.lng.toFixed(5) : '—'}</span>
+              <span class="conf-line ${confClass}">${confLabel} (${(conf * 100).toFixed(0)}%)${below ? ' · sous le seuil' : ''}</span>
+              <span class="meta-line">${iconSvg('pin')} ${d.center ? d.center.lat.toFixed(5) + ', ' + d.center.lng.toFixed(5) : '—'}</span>
             </div>
           </div>
           <div class="detection-price">${est.price_ht.toFixed(0)}€</div>
-          <button class="btn-delete-zone" data-idx="${i}" title="Supprimer la zone">🗑️</button>
+          <button class="btn-delete-zone" data-idx="${i}" title="Supprimer la zone">${iconSvg('trash')}</button>
         </div>
       `;
     }).join('');
@@ -611,7 +628,7 @@ window.Sidebar = (() => {
     });
     const res = await window.solarAPI.exportCSV(rows);
     if (res.ok) Toast.show(`CSV exporté`, 'success');
-    else if (res.reason !== 'cancelled') Toast.show('Erreur export CSV', 'error');
+    else if (res.reason !== 'cancelled') exportFailToast('Erreur export CSV', res);
   });
   }
 
@@ -636,7 +653,7 @@ window.Sidebar = (() => {
       
       const res = await window.solarAPI.saveProject(projectData);
       if (res.ok) Toast.show('Projet sauvegardé avec succès', 'success');
-      else if (res.reason !== 'cancelled') Toast.show('Erreur lors de la sauvegarde', 'error');
+      else if (res.reason !== 'cancelled') exportFailToast('Erreur lors de la sauvegarde', res);
     });
   }
 
@@ -673,7 +690,7 @@ window.Sidebar = (() => {
         }
         Toast.show('Projet chargé avec succès !', 'success');
       } else if (res.reason !== 'cancelled') {
-        Toast.show('Fichier invalide ou corrompu', 'error');
+        exportFailToast('Fichier invalide ou corrompu', res);
       }
     });
   }
@@ -755,59 +772,91 @@ window.Sidebar = (() => {
       return;
     }
     $clientModal.style.display = 'none';
-    
+
     if (!window.solarAPI) return;
-    
-    // Attendre que la modale disparaisse visuellement de l'écran avant de capturer
-    await new Promise(resolve => setTimeout(resolve, 600));
 
-    Toast.show('Génération du devis en cours...', 'info', 5000);
+    try {
+      // Attendre que la modale disparaisse visuellement de l'écran avant de capturer
+      await new Promise(resolve => setTimeout(resolve, 600));
 
-    const clientInfo = {
-      name: $inputClientName.value || 'Client Anonyme',
-      address: $inputClientAddress.value || 'Adresse non spécifiée',
-    };
+      Toast.show('Génération du devis en cours...', 'info', 8000);
 
-    let mapDataUrl = '';
-    const mapEl = document.getElementById('map');
-    if (mapEl && window.solarAPI.captureRect) {
-      const rect = mapEl.getBoundingClientRect();
-      const bounds = {
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height)
+      const clientInfo = {
+        name: $inputClientName.value || 'Client Anonyme',
+        address: $inputClientAddress.value || 'Adresse non spécifiée',
       };
-      mapDataUrl = await window.solarAPI.captureRect(bounds);
-    }
 
-    const billable = _detections.filter(isBillable);
-    const totals = quoteTotals(billable);
-    const numero = window.PDFGenerator.quoteNumber(_settings);
-    const html = window.PDFGenerator.build(clientInfo, mapDataUrl, billable, _settings, _businessOptions, computeEstimate);
-    const res = await window.solarAPI.exportPDF(html, `${numero}.pdf`);
-    if (res.ok) {
-      const current = parseInt(_settings.next_quote_number, 10) || 1;
-      _settings.next_quote_number = current + 1;
-      const quoteNextInput = document.getElementById('setting-quote-next');
-      if (quoteNextInput) quoteNextInput.value = _settings.next_quote_number;
-      if (window.solarAPI.saveSettings) await window.solarAPI.saveSettings(_settings);
-      if (window.solarAPI.appendHistory) {
-        await window.solarAPI.appendHistory({
-          id: String(Date.now()),
-          date: new Date().toISOString(),
-          numero,
-          client: clientInfo.name,
-          adresse: clientInfo.address,
-          panneaux: billable.length,
-          surface_m2: totals.area,
-          prix_ht: totals.ht,
-          prix_ttc: totals.ttc,
-          fichier: res.filePath || '',
+      let mapDataUrl = '';
+      const mapEl = document.getElementById('map');
+      if (mapEl && window.solarAPI.captureRect) {
+        const rect = mapEl.getBoundingClientRect();
+        const bounds = {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        };
+        mapDataUrl = await window.solarAPI.captureRect(bounds) || '';
+      }
+
+      if (window.PDFGenerator.compactImage) {
+        mapDataUrl = await window.PDFGenerator.compactImage(mapDataUrl, {
+          maxWidth: 1600,
+          maxHeight: 1100,
+          quality: 0.82,
+          maxChars: 800000,
+          format: 'image/jpeg',
         });
       }
-      Toast.show(`Devis ${numero} exporté`, 'success');
-    } else if (res.reason !== 'cancelled') Toast.show('Erreur export PDF', 'error');
+
+      const settingsForPdf = Object.assign({}, _settings);
+      if (window.PDFGenerator.compactImage && _settings.company_logo) {
+        settingsForPdf.company_logo = await window.PDFGenerator.compactImage(_settings.company_logo, {
+          maxWidth: 400,
+          maxHeight: 160,
+          quality: 0.9,
+          maxChars: 220000,
+          format: 'image/png',
+        });
+      }
+
+      const billable = _detections.filter(isBillable);
+      const totals = quoteTotals(billable);
+      const numero = window.PDFGenerator.quoteNumber(_settings);
+      const html = window.PDFGenerator.build(clientInfo, mapDataUrl, billable, settingsForPdf, _businessOptions, computeEstimate);
+      const res = await window.solarAPI.exportPDF(html, `${numero}.pdf`);
+      if (res.ok) {
+        const current = parseInt(_settings.next_quote_number, 10) || 1;
+        _settings.next_quote_number = current + 1;
+        const quoteNextInput = document.getElementById('setting-quote-next');
+        if (quoteNextInput) quoteNextInput.value = _settings.next_quote_number;
+        if (window.solarAPI.saveSettings) {
+          const saved = await window.solarAPI.saveSettings(_settings);
+          if (saved && saved.ok === false) {
+            Toast.show("Devis enregistré, mais les réglages n'ont pas pu être sauvés : " + (saved.reason || 'erreur'), 'warning', 7000);
+          }
+        }
+        if (window.solarAPI.appendHistory) {
+          await window.solarAPI.appendHistory({
+            id: String(Date.now()),
+            date: new Date().toISOString(),
+            numero,
+            client: clientInfo.name,
+            adresse: clientInfo.address,
+            panneaux: billable.length,
+            surface_m2: totals.area,
+            prix_ht: totals.ht,
+            prix_ttc: totals.ttc,
+            fichier: res.filePath || '',
+          });
+        }
+        Toast.show(`Devis ${numero} exporté`, 'success');
+      } else if (res.reason !== 'cancelled') {
+        exportFailToast('Erreur export PDF', res);
+      }
+    } catch (err) {
+      exportFailToast('Erreur export PDF', err);
+    }
   });
 
 
@@ -816,25 +865,25 @@ window.Sidebar = (() => {
   function _renderTournee() {
     _tourneeSummary = null;
     if ($btnOpenTournee) {
-      $btnOpenTournee.innerHTML = `🚗 Ma Tournée (${_tournee.length})`;
+      $btnOpenTournee.innerHTML = `${iconSvg('route')} Ma Tournée (${_tournee.length})`;
     }
     
     if ($tourneeTbody) {
       $tourneeTbody.innerHTML = _tournee.map((t, i) => `
         <tr>
           <td>
-            ${i === 0 ? '<span title="Point de départ" style="font-size: 16px;">📍</span>' : `<span style="color: #666; font-size: 11px;">Étape ${i}</span>`}
+            ${i === 0 ? '<span title="Point de départ" class="tour-start">' + iconSvg('pin') + '</span>' : `<span class="tour-step">Étape ${i}</span>`}
           </td>
           <td>${escapeText(t.name)}</td>
           <td>${escapeText(t.address)}</td>
           <td style="text-align: right; font-weight: bold; display: flex; align-items: center; justify-content: flex-end; gap: 6px;">
             ${Number(t.price || 0).toFixed(2)} €
             <div style="display: flex; flex-direction: column; gap: 2px;">
-              <span class="btn-up-tournee" data-idx="${i}" style="cursor: ${i === 0 ? 'not-allowed; opacity: 0.3;' : 'pointer;'}" title="Monter">🔼</span>
-              <span class="btn-down-tournee" data-idx="${i}" style="cursor: ${i === _tournee.length - 1 ? 'not-allowed; opacity: 0.3;' : 'pointer;'}" title="Descendre">🔽</span>
+              <button type="button" class="btn-icon-plain btn-up-tournee" data-idx="${i}" style="cursor: ${i === 0 ? 'not-allowed; opacity: 0.3;' : 'pointer;'}" title="Monter">${iconSvg('up')}</button>
+              <button type="button" class="btn-icon-plain btn-down-tournee" data-idx="${i}" style="cursor: ${i === _tournee.length - 1 ? 'not-allowed; opacity: 0.3;' : 'pointer;'}" title="Descendre">${iconSvg('down')}</button>
             </div>
-            <span class="btn-edit-tournee" data-idx="${i}" style="cursor: pointer; margin-left: 8px;" title="Modifier">✏️</span>
-            <span class="btn-delete-tournee" data-idx="${i}" style="cursor: pointer;" title="Retirer">🗑️</span>
+            <button type="button" class="btn-icon-plain btn-edit-tournee" data-idx="${i}" title="Modifier">${iconSvg('pencil')}</button>
+            <button type="button" class="btn-icon-plain btn-delete-tournee" data-idx="${i}" title="Retirer">${iconSvg('trash')}</button>
           </td>
         </tr>
       `).join('');
@@ -1179,7 +1228,7 @@ window.Sidebar = (() => {
     if (!$historyBody || !window.solarAPI || !window.solarAPI.getHistory) return;
     const rows = await window.solarAPI.getHistory();
     if (!rows || !rows.length) {
-      $historyBody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:16px; color:#888;">Aucun devis enregistré pour le moment.</td></tr>';
+      $historyBody.innerHTML = '<tr><td colspan="6" class="table-empty">Aucun devis enregistré pour le moment.</td></tr>';
       return;
     }
     $historyBody.innerHTML = rows.map((row) => `
@@ -1189,6 +1238,10 @@ window.Sidebar = (() => {
         <td>${escapeText(row.client)}</td>
         <td>${escapeText(row.adresse)}</td>
         <td style="text-align:right;">${Number(row.prix_ttc || 0).toFixed(0)} €</td>
+        <td class="history-actions">
+          <button type="button" class="btn btn-ghost btn-sm btn-open-history" data-file="${escapeText(row.fichier || '')}">Ouvrir</button>
+          <button type="button" class="btn btn-ghost btn-sm btn-reexport-history" data-file="${escapeText(row.fichier || '')}">Réexporter</button>
+        </td>
       </tr>
     `).join('');
   }
@@ -1204,12 +1257,37 @@ window.Sidebar = (() => {
       if ($historyModal) $historyModal.style.display = 'none';
     });
   }
+  if ($historyBody) {
+    $historyBody.addEventListener('click', async (event) => {
+      const openBtn = event.target.closest('.btn-open-history');
+      const reexportBtn = event.target.closest('.btn-reexport-history');
+      const btn = openBtn || reexportBtn;
+      if (!btn || !window.solarAPI) return;
+      const file = btn.getAttribute('data-file') || '';
+      if (!file) {
+        Toast.show('Aucun fichier associé à ce devis', 'warning');
+        return;
+      }
+      try {
+        const res = openBtn
+          ? await window.solarAPI.openHistoryFile(file)
+          : await window.solarAPI.reexportHistoryFile(file);
+        if (res.ok) {
+          Toast.show(openBtn ? 'Devis ouvert' : 'Devis réexporté', 'success');
+        } else if (res.reason !== 'cancelled') {
+          exportFailToast(openBtn ? "Impossible d'ouvrir le devis" : 'Réexport impossible', res);
+        }
+      } catch (err) {
+        exportFailToast('Historique', err);
+      }
+    });
+  }
   if ($btnExportHistory) {
     $btnExportHistory.addEventListener('click', async () => {
       if (!window.solarAPI || !window.solarAPI.exportHistoryCSV) return;
       const res = await window.solarAPI.exportHistoryCSV();
       if (res.ok) Toast.show('Historique exporté', 'success');
-      else if (res.reason !== 'cancelled') Toast.show('Export impossible', 'error');
+      else if (res.reason !== 'cancelled') exportFailToast('Export impossible', res);
     });
   }
 
@@ -1220,10 +1298,14 @@ window.Sidebar = (() => {
         Toast.show('Ajoutez au moins un client à la tournée', 'warning');
         return;
       }
-      const html = window.PDFGenerator.buildTourSheet(_tournee, _tourneeSummary, _settings);
-      const res = await window.solarAPI.exportPDF(html, 'feuille_de_route.pdf');
-      if (res.ok) Toast.show('Feuille de route exportée', 'success');
-      else if (res.reason !== 'cancelled') Toast.show('Erreur PDF', 'error');
+      try {
+        const html = window.PDFGenerator.buildTourSheet(_tournee, _tourneeSummary, _settings);
+        const res = await window.solarAPI.exportPDF(html, 'feuille_de_route.pdf');
+        if (res.ok) Toast.show('Feuille de route exportée', 'success');
+        else if (res.reason !== 'cancelled') exportFailToast('Erreur PDF', res);
+      } catch (err) {
+        exportFailToast('Erreur PDF', err);
+      }
     });
   }
 
@@ -1253,8 +1335,17 @@ window.Toast = (() => {
   function show(message, type = 'info', duration = 3000) {
     const el = document.createElement('div');
     el.className = `toast ${type}`;
-    const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ';
-    el.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+    const iconName = type === 'success' ? 'check' : type === 'error' ? 'x' : type === 'warning' ? 'alert' : 'info';
+    const ic = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    ic.setAttribute('class', 'icon');
+    ic.setAttribute('aria-hidden', 'true');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#i-' + iconName);
+    ic.appendChild(use);
+    const text = document.createElement('span');
+    text.textContent = String(message ?? '');
+    el.appendChild(ic);
+    el.appendChild(text);
     $container.appendChild(el);
     setTimeout(() => {
       el.style.opacity = '0';
