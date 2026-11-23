@@ -41,6 +41,16 @@ window.Sidebar = (() => {
   let _confidenceMin = 0;
   let _tourneeSummary = null;
 
+
+  function syncRangeFill(el) {
+    if (!el) return;
+    const min = Number(el.min) || 0;
+    const max = Number(el.max) || 100;
+    const val = Number(el.value) || 0;
+    const pct = max === min ? 0 : ((val - min) / (max - min)) * 100;
+    el.style.setProperty('--range-pct', `${pct}%`);
+  }
+
   function escapeText(value) {
     return String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -93,7 +103,10 @@ window.Sidebar = (() => {
           _confidenceMin = Math.min(0.9, Math.max(0, session.confidenceMin));
           const slider = document.getElementById('confidence-min');
           const label = document.getElementById('confidence-min-label');
-          if (slider) slider.value = String(Math.round(_confidenceMin * 100));
+          if (slider) {
+            slider.value = String(Math.round(_confidenceMin * 100));
+            syncRangeFill(slider);
+          }
           if (label) label.textContent = `${Math.round(_confidenceMin * 100)} %`;
         }
         
@@ -642,7 +655,10 @@ window.Sidebar = (() => {
           _confidenceMin = Math.min(0.9, Math.max(0, data.confidenceMin));
           const slider = document.getElementById('confidence-min');
           const label = document.getElementById('confidence-min-label');
-          if (slider) slider.value = String(Math.round(_confidenceMin * 100));
+          if (slider) {
+            slider.value = String(Math.round(_confidenceMin * 100));
+            syncRangeFill(slider);
+          }
           if (label) label.textContent = `${Math.round(_confidenceMin * 100)} %`;
         }
         if (data.detections) {
@@ -1125,9 +1141,11 @@ window.Sidebar = (() => {
   const $confidence = document.getElementById('confidence-min');
   const $confidenceLabel = document.getElementById('confidence-min-label');
   if ($confidence) {
+    syncRangeFill($confidence);
     $confidence.addEventListener('input', () => {
       _confidenceMin = (parseInt($confidence.value, 10) || 0) / 100;
       if ($confidenceLabel) $confidenceLabel.textContent = `${parseInt($confidence.value, 10) || 0} %`;
+      syncRangeFill($confidence);
       _render();
     });
   }

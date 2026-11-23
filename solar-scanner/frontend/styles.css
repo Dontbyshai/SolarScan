@@ -1,6 +1,6 @@
 /* ============================================================
    Solar Scanner — Design System & Styles
-   Dark premium theme with accent #00d4aa (teal)
+   Light theme, accent #3b82f6 (blue) — aligned with the toolbar
    ============================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -154,6 +154,11 @@ html, body {
 }
 
 .btn:active { transform: scale(0.97); }
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  border-color: var(--accent);
+}
 
 .btn-ghost {
   background: transparent;
@@ -171,12 +176,11 @@ html, body {
   color: #ffffff;
   border-color: transparent;
   font-weight: 600;
-  box-shadow: 0 2px 4px var(--accent-glow);
-  box-shadow: 0 4px 12px rgba(0, 212, 170, 0.25);
+  box-shadow: 0 4px 12px var(--accent-glow);
 }
 .btn-accent:hover {
   background: var(--accent-hover);
-  box-shadow: 0 6px 16px rgba(0, 212, 170, 0.35);
+  box-shadow: 0 6px 16px var(--accent-glow);
   transform: translateY(-1px);
 }
 .btn-accent:disabled {
@@ -466,6 +470,7 @@ html, body {
   color: #52525b;
 }
 
+/* Range: styled in the form-controls block at the end of this file */
 .confidence-tools input[type="range"] {
   width: 100%;
 }
@@ -789,7 +794,7 @@ html, body {
 
 .popup-price-section {
   background: var(--accent-dim);
-  border: 1px solid rgba(0, 212, 170, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.25);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   margin-bottom: 12px;
@@ -916,22 +921,23 @@ html, body {
 /* Settings Form (Light Theme) */
 .setting-row { margin-bottom: 16px; }
 .setting-row label { display: block; font-size: 12px; margin-bottom: 6px; color: #52525b; font-weight: 500; }
-.setting-row input { 
-  width: 100%; 
-  background: #f4f4f5; 
-  border: 1px solid #e4e4e7; 
-  color: #18181b; 
-  padding: 10px 12px; 
-  border-radius: 8px; 
-  font-size: 14px; 
-  transition: all 0.2s ease; 
+.setting-row input {
+  width: 100%;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  transition: all var(--transition);
 }
 .setting-row input::placeholder { color: #a1a1aa; }
-.setting-row input:focus { 
-  border-color: var(--accent); 
-  background: #ffffff; 
-  outline: none; 
-  box-shadow: 0 0 0 3px rgba(0, 212, 170, 0.15); 
+.setting-row input:focus {
+  border-color: var(--accent);
+  background: #ffffff;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 .setting-actions { display: flex; gap: 12px; }
 .setting-actions button { flex: 1; justify-content: center; padding: 10px; font-weight: 600; border-radius: 8px; }
@@ -976,7 +982,7 @@ html, body {
 .modal-content h3 {
   margin-top: 0;
   margin-bottom: 12px;
-  color: #008f72; /* Slightly darker accent for light mode readability */
+  color: var(--accent-hover);
   font-size: 22px;
   font-weight: 600;
   letter-spacing: -0.5px;
@@ -1011,10 +1017,444 @@ html, body {
   background: var(--accent);
   color: #ffffff;
   border: none;
-  box-shadow: 0 4px 14px rgba(0, 212, 170, 0.3);
+  box-shadow: 0 4px 14px var(--accent-glow);
 }
 .modal-actions #btn-client-confirm:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(0, 212, 170, 0.4);
-  background: #00e6b8;
+  box-shadow: 0 6px 20px var(--accent-glow);
+  background: var(--accent-hover);
+}
+
+
+/* ============================================================
+   Form controls, tables & modal polish
+   Same typography, radii, spacing and palette as the toolbar
+   ============================================================ */
+
+.btn-small {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.btn-icon:focus-visible,
+.layer-btn:focus-visible,
+.search-container input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+/* Shared text / number / select / textarea */
+.modal-content input[type="text"],
+.modal-content input[type="number"],
+.modal-content input[type="email"],
+.modal-content input[type="url"],
+.modal-content input[type="search"],
+.modal-content select,
+.modal-content textarea,
+.detection-label-input,
+#tournee-modal input[type="text"],
+#tournee-modal input[type="number"],
+.options-table input,
+.options-table select {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+  box-shadow: none;
+  min-width: 0;
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.modal-content textarea {
+  min-height: 72px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.modal-content input[type="number"] {
+  font-variant-numeric: tabular-nums;
+  font-family: 'JetBrains Mono', 'Inter', system-ui, sans-serif;
+  font-size: 12.5px;
+}
+
+.modal-content select,
+.options-table select {
+  background-color: var(--bg-3);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2364748b' d='M1.2 1.2L6 6l4.8-4.8' stroke='none'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 7px;
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+.modal-content input[type="text"]:hover,
+.modal-content input[type="number"]:hover,
+.modal-content input[type="email"]:hover,
+.modal-content select:hover,
+.modal-content textarea:hover,
+.detection-label-input:hover,
+.options-table input:hover,
+.options-table select:hover {
+  border-color: var(--border-light);
+  background: #ffffff;
+}
+
+.modal-content input[type="text"]:focus,
+.modal-content input[type="number"]:focus,
+.modal-content input[type="email"]:focus,
+.modal-content select:focus,
+.modal-content textarea:focus,
+.detection-label-input:focus,
+.options-table input:focus,
+.options-table select:focus,
+.search-container input:focus {
+  border-color: var(--accent);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.modal-content input::placeholder,
+.setting-row input::placeholder,
+.detection-label-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Compact number fields in the tariff rows keep their inline width */
+.setting-row input[type="number"] {
+  min-height: 36px;
+}
+
+/* ── Range sliders (Confiance minimum, any other range) ── */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  margin: 4px 0;
+  --range-pct: 0%;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--range-pct),
+    var(--border) var(--range-pct) 100%
+  );
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--accent);
+  box-shadow: 0 1px 4px var(--accent-glow);
+  margin-top: -6px;
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 4px var(--accent-dim);
+}
+
+input[type="range"]:focus-visible::-webkit-slider-runnable-track {
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  border: none;
+}
+
+input[type="range"]::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: none;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--accent);
+  box-shadow: 0 1px 4px var(--accent-glow);
+  box-sizing: border-box;
+}
+
+/* ── Checkboxes ── */
+input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+  border: 1.5px solid var(--border-light);
+  border-radius: 4px;
+  background: #ffffff;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 10px 10px;
+}
+
+input[type="checkbox"]:hover {
+  border-color: var(--accent);
+}
+
+input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+input[type="checkbox"]:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M2.5 6.3L5 8.8 9.5 3.4'/%3E%3C/svg%3E");
+}
+
+input[type="checkbox"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.detection-checkbox {
+  margin-top: 3px;
+  transform: none !important;
+}
+
+.business-opt-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.business-options-container {
+  padding: 8px 16px 4px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detection-label-input {
+  width: 100%;
+  padding: 4px 8px;
+  font-weight: 600;
+  background: transparent;
+  border-color: transparent;
+}
+
+.detection-label-input:hover,
+.detection-label-input:focus {
+  background: #ffffff;
+  border-color: var(--border);
+}
+
+/* ── Options / history / tournée tables ── */
+.options-table-container {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  padding: 8px 10px;
+}
+
+#options-modal .modal-content {
+  width: 760px !important;
+  max-width: 96vw;
+  overflow: visible;
+}
+
+.options-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 6px;
+  table-layout: fixed;
+  font-family: inherit;
+}
+
+.options-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.options-table tbody td {
+  padding: 4px 8px;
+  vertical-align: middle;
+}
+
+#options-table th:nth-child(1),
+#options-table td:nth-child(1) { width: 38%; }
+#options-table th:nth-child(2),
+#options-table td:nth-child(2) { width: 36%; }
+#options-table th:nth-child(3),
+#options-table td:nth-child(3) { width: 14%; }
+#options-table th:nth-child(4),
+#options-table td:nth-child(4) {
+  width: 48px;
+  text-align: center;
+  padding-right: 4px;
+}
+
+.options-table input,
+.options-table select {
+  width: 100%;
+  max-width: 100%;
+}
+
+.options-table .btn-danger {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.options-table .btn-danger:hover {
+  background: var(--red);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.25);
+}
+
+/* History & tournée tables share the same look */
+#history-modal .options-table,
+#tournee-modal .options-table {
+  border-spacing: 0;
+}
+
+#history-modal .options-table td,
+#tournee-modal .options-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+#history-modal .options-table tbody tr:hover,
+#tournee-modal .options-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+#tournee-results {
+  background: var(--accent-dim) !important;
+  border: 1px solid rgba(59, 130, 246, 0.35) !important;
+  border-radius: var(--radius) !important;
+}
+
+#tournee-results h4,
+#tournee-total-final {
+  color: var(--accent-hover) !important;
+}
+
+.modal-content {
+  font-family: 'Inter', system-ui, sans-serif;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+#options-modal .modal-content {
+  overflow: visible;
+}
+
+.modal-content h3 {
+  letter-spacing: -0.3px;
+}
+
+.modal-content h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.btn-delete-zone,
+.btn-delete-tournee {
+  background: var(--red-dim);
+  color: var(--red);
+  border: none;
+  border-radius: var(--radius-sm);
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all var(--transition);
+}
+
+.btn-delete-zone:hover,
+.btn-delete-tournee:hover {
+  background: var(--red);
+  color: #ffffff;
+}
+
+#sv-modal > div {
+  border-radius: 16px !important;
+  overflow: hidden;
+}
+
+#btn-close-sv {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition), color var(--transition);
+}
+
+#btn-close-sv:hover {
+  background: var(--bg-4);
+  color: var(--text-primary) !important;
+}
+
+#btn-close-sv:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
