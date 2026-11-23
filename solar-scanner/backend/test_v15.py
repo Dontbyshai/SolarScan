@@ -142,6 +142,40 @@ class HeuristicTests(unittest.TestCase):
         self.assertGreater(path.stat().st_size, 1_000_000)
 
 
+
+    def test_yolo_repli_sur_heuristique(self):
+        """Si l'inférence YOLO lève (ex. nms manquant), on tombe sur l'heuristique."""
+        import detector as det
+
+        img = Image.new("RGB", (320, 320), (46, 140, 52))
+        px = img.load()
+        for x in range(40, 130):
+            for y in range(40, 110):
+                px[x, y] = (28, 52, 108)
+
+        class Boom:
+            def detect(self, _image):
+                raise RuntimeError("operator torchvision::nms does not exist")
+
+        prev_det = det._yolo_detector
+        prev_tried = det._yolo_tried
+        prev_reason = det._engine_reason
+        try:
+            det._yolo_detector = Boom()
+            det._yolo_tried = True
+            det._engine_reason = None
+            bounds = {"north": 43.58, "south": 43.57, "east": 3.87, "west": 3.86}
+            found = det.analyze_image(img, bounds, 19)
+            self.assertIsNone(det._yolo_detector)
+            self.assertEqual(det.engine_name(), "heuristique")
+            self.assertIn("nms", det.engine_reason() or "")
+            self.assertGreaterEqual(len(found), 1)
+        finally:
+            det._yolo_detector = prev_det
+            det._yolo_tried = prev_tried
+            det._engine_reason = prev_reason
+
+
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(main.app, client=("127.0.0.1", 50000))
@@ -184,6 +218,10 @@ class SpecTests(unittest.TestCase):
         self.assertIn("certifi", text)
         self.assertIn("collect_data_files", text)
         self.assertIn("solar_detector.pt", text)
+        self.assertIn("torchvision", text)
+        self.assertIn("collect_dynamic_libs", text)
+        self.assertIn("_C_stable", text)
+        self.assertIn("pyi_rth_torchvision_ops", text)
 
 
 

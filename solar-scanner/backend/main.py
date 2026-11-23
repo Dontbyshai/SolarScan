@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from detector import analyze_image, engine_name
+from detector import analyze_image, engine_name, engine_reason
 from http_ssl import client_session
 from paths import data_dir, log_path, settings_path
 from tiles import (
@@ -202,13 +202,17 @@ class RouteRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {
+    payload = {
         "status": "ok",
         "service": "SolarScan",
         "version": APP_VERSION,
         "engine": engine_name(),
         "note": "Données IGN — France uniquement",
     }
+    reason = engine_reason()
+    if reason:
+        payload["reason"] = reason
+    return payload
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
@@ -265,8 +269,11 @@ async def analyze(request: AnalyzeRequest):
     try:
         raw_detections = analyze_image(composite_image, composite_bounds, zoom)
     except Exception as exc:
-        logger.error(f"Erreur de détection : {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Erreur de détection")
+        # YOLO est déjà rattrapé dans analyze_image (repli heuristique).
+        # Ici, on ne renvoie plus un « Erreur de détection » nu.
+        logger.error("Échec inattendu de l'analyse : %s", exc, exc_info=True)
+        detail = f"L'analyse n'a pas pu aboutir ({type(exc).__name__})."
+        raise HTTPException(status_code=500, detail=detail)
 
     elapsed = int((time.time() - start) * 1000)
     logger.info(f"Analyse terminée : {len(raw_detections)} détection(s) en {elapsed} ms")

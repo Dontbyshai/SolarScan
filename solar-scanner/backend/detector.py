@@ -25,6 +25,16 @@ from geo_utils import (
 )
 from paths import resolve_model_path
 
+# torchvision doit être importé (et ses ops C++ enregistrés) avant YOLO.
+# Dans l'exécutable gelé, le runtime hook fait la même chose au démarrage.
+try:
+    import torch  # noqa: F401
+    import torchvision  # noqa: F401
+    import torchvision.ops  # noqa: F401
+except Exception:
+    # L'heuristique reste disponible si torch/torchvision manque.
+    pass
+
 logger = logging.getLogger(__name__)
 
 # ── Model paths ────────────────────────────────────────────────────────────────
@@ -39,6 +49,9 @@ CONFIDENCE_HEURISTIC = 0.65  # Confiance de base du mode heuristique V1
 
 class YoloDetector:
     def __init__(self, model_path: Path):
+        import torch  # noqa: F401
+        import torchvision  # noqa: F401
+        import torchvision.ops  # noqa: F401
         from ultralytics import YOLO
         self.model = YOLO(str(model_path))
         logger.info(f"YOLOv8 model loaded from: {model_path.name}")
@@ -232,26 +245,61 @@ class HeuristicDetector:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _yolo_detector: Optional[YoloDetector] = None
+_yolo_tried = False
+_engine_reason: Optional[str] = None
 _heuristic_detector = HeuristicDetector()
 
 
 def engine_name() -> str:
-    """'yolo' si le poids est chargé, sinon 'heuristique'."""
+    """'yolo' si le poids est chargé et a passé l'auto-test, sinon 'heuristique'."""
     return "yolo" if _get_detector() else "heuristique"
 
 
-def _get_detector():
-    global _yolo_detector
-    model_file = resolve_model_path()
-    if model_file.exists() and _yolo_detector is None:
-        try:
-            _yolo_detector = YoloDetector(model_file)
-            logger.info("Détecteur YOLOv8 chargé")
-        except Exception as e:
-            logger.warning(f"Modèle YOLO illisible ({e}). Repli sur l'heuristique.")
-            _yolo_detector = None
+def engine_reason() -> Optional[str]:
+    """Pourquoi l'heuristique est utilisée, ou None si YOLO est actif."""
+    _get_detector()
+    return _engine_reason
 
-    return _yolo_detector if _yolo_detector else None
+
+def _disable_yolo(exc: BaseException) -> None:
+    """Mémorise l'échec YOLO pour /health et les analyses suivantes."""
+    global _yolo_detector, _yolo_tried, _engine_reason
+    _yolo_detector = None
+    _yolo_tried = True
+    message = f"{type(exc).__name__}: {exc}"
+    _engine_reason = message[:300]
+    logger.warning("Repli sur l'heuristique (%s).", _engine_reason)
+
+
+def _self_test_yolo(detector: "YoloDetector") -> None:
+    """Une inférence à blanc : attrape le nms manquant dès le chargement."""
+    blank = Image.new("RGB", (256, 256), (0, 0, 0))
+    detector.detect(blank)
+
+
+def _get_detector():
+    global _yolo_detector, _yolo_tried, _engine_reason
+    if _yolo_tried:
+        return _yolo_detector
+
+    _yolo_tried = True
+    model_file = resolve_model_path()
+    if not model_file.exists():
+        _engine_reason = "modèle YOLO absent"
+        logger.warning("Aucun poids YOLO trouvé. Repli sur l'heuristique.")
+        return None
+
+    try:
+        detector = YoloDetector(model_file)
+        _self_test_yolo(detector)
+        _yolo_detector = detector
+        _engine_reason = None
+        logger.info("Détecteur YOLOv8 chargé")
+        return _yolo_detector
+    except Exception as exc:
+        logger.warning("Modèle YOLO inutilisable (%s). Repli sur l'heuristique.", exc, exc_info=True)
+        _disable_yolo(exc)
+        return None
 
 
 def analyze_image(
@@ -275,12 +323,20 @@ def analyze_image(
     lat_center = (composite_bounds["north"] + composite_bounds["south"]) / 2
 
     detector = _get_detector()
+    raw_detections: List[Dict] = []
 
     if detector:
-        # ONNX pipeline (à compléter avec fine-tuned model)
-        raw_detections = detector.detect(image)
+        try:
+            raw_detections = detector.detect(image)
+        except Exception as exc:
+            logger.warning(
+                "YOLO a échoué pendant l'analyse (%s). Repli sur l'heuristique.",
+                exc,
+                exc_info=True,
+            )
+            _disable_yolo(exc)
+            raw_detections = _heuristic_detector.detect(image)
     else:
-        # Heuristic pipeline
         raw_detections = _heuristic_detector.detect(image)
 
     results = []
