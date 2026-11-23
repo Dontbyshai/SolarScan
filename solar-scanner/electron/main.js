@@ -190,7 +190,7 @@ function startPythonBackend() {
   });
 }
 
-function waitForBackend(retries = 30, delay = 500) {
+function waitForBackend(retries = 240, delay = 500) {
   return new Promise((resolve, reject) => {
     function attempt(n) {
       const req = http.get(`http://127.0.0.1:${BACKEND_PORT}/health`, (res) => {
@@ -284,7 +284,8 @@ async function createWindow() {
   if (IS_DEV) mainWindow.webContents.openDevTools({ mode: 'detach' });
 
   try {
-    await waitForBackend(40, 500);
+    // Premier lancement du moteur one-file : l'extraction peut dépasser 60 s.
+    await waitForBackend(240, 500);
     mainWindow.webContents.send('backend-ready');
   } catch (err) {
     console.error('[Electron] Délai dépassé :', err.message);

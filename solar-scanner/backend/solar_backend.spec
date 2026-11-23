@@ -7,7 +7,7 @@ pas inclus : ils se téléchargent avec download_model.py dans le dossier
 utilisateur, pour rester inscriptibles une fois l'application installée.
 """
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 datas = []
 binaries = []
@@ -33,6 +33,7 @@ hiddenimports = [
     "torch",
     "scipy",
     "shapely",
+    "certifi",
 ]
 
 # Ces paquets sont importés tardivement (YOLO) ou livrent des fichiers
@@ -51,6 +52,10 @@ for package in ("cv2", "ultralytics", "torch", "aiohttp", "uvicorn"):
     hiddenimports += pkg_hidden
 
 hiddenimports += collect_submodules("ultralytics")
+
+# cacert.pem : sans ce fichier, le contexte SSL de http_ssl.py
+# ne trouve aucune autorité dans l'exécutable gelé.
+datas += collect_data_files("certifi")
 
 a = Analysis(
     ["main.py"],

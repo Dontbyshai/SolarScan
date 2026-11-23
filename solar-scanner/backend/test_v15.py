@@ -14,7 +14,8 @@ from PIL import Image  # noqa: E402
 
 import main  # noqa: E402
 from detector import HeuristicDetector  # noqa: E402
-from paths import cache_dir, model_path, settings_path  # noqa: E402
+from http_ssl import ssl_context  # noqa: E402
+from paths import cache_dir, log_path, model_path, settings_path  # noqa: E402
 from tiles import sanitize_tiles  # noqa: E402
 
 
@@ -25,6 +26,8 @@ class PathsTests(unittest.TestCase):
         self.assertEqual(model_path().name, "solar_detector.pt")
         self.assertTrue(str(cache_dir()).startswith(_TMP))
         self.assertFalse(str(settings_path()).endswith("assets/settings.json"))
+        self.assertTrue(str(log_path()).startswith(_TMP))
+        self.assertEqual(log_path().name, "backend.log")
 
 
 class TileTests(unittest.TestCase):
@@ -118,6 +121,22 @@ class SpecTests(unittest.TestCase):
         self.assertIn("ultralytics", text)
         self.assertIn('"cv2"', text)
         self.assertIn("collect_all", text)
+        self.assertIn("certifi", text)
+        self.assertIn("collect_data_files", text)
+
+
+
+class SslTests(unittest.TestCase):
+    def test_contexte_utilise_certifi_et_verifie(self):
+        import ssl
+
+        import certifi
+
+        ctx = ssl_context()
+        self.assertTrue(ctx.check_hostname)
+        self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(Path(certifi.where()).is_file())
+        self.assertGreater(len(ctx.get_ca_certs()), 0)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import os
 import signal
 import time
 from collections import OrderedDict
+from logging.handlers import RotatingFileHandler
 from typing import Dict, List
 from urllib.parse import urlparse
 
@@ -23,7 +24,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from detector import analyze_image, engine_name
-from paths import data_dir, settings_path
+from http_ssl import client_session
+from paths import data_dir, log_path, settings_path
 from tiles import (
     assemble_tiles,
     clear_tile_cache,
@@ -38,10 +40,39 @@ OSRM_HOST = "router.project-osrm.org"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+
+def setup_logging() -> None:
+    """Journal console + fichier dans le dossier utilisateur."""
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    formatter = logging.Formatter(_LOG_FORMAT)
+    if not any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in root.handlers):
+        stream = logging.StreamHandler()
+        stream.setFormatter(formatter)
+        root.addHandler(stream)
+    try:
+        path = log_path()
+        already = any(
+            isinstance(h, logging.FileHandler)
+            and os.path.abspath(getattr(h, "baseFilename", "")) == os.path.abspath(path)
+            for h in root.handlers
+        )
+        if not already:
+            file_handler = RotatingFileHandler(
+                path,
+                maxBytes=2_000_000,
+                backupCount=2,
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(formatter)
+            root.addHandler(file_handler)
+    except OSError as exc:
+        root.warning("Impossible d'écrire le journal fichier : %s", exc)
+
+
+setup_logging()
 logger = logging.getLogger("solar-scanner")
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -195,13 +226,22 @@ async def analyze(request: AnalyzeRequest):
     try:
         downloaded = await download_tiles_batch(tiles_data)
     except Exception as exc:
-        logger.error(f"Erreur de téléchargement : {exc}")
+        logger.error(
+            "Erreur de téléchargement des tuiles IGN : %s: %s",
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
         raise HTTPException(status_code=502, detail="Erreur de téléchargement des tuiles IGN")
 
     tiles_failed = len(tiles_data) - len(downloaded)
     logger.info(f"Tuiles reçues : {len(downloaded)}/{len(tiles_data)} ({tiles_failed} en échec)")
 
     if not downloaded:
+        logger.error(
+            "Aucune tuile IGN reçue (%s demandées). Voir les erreurs de téléchargement ci-dessus.",
+            len(tiles_data),
+        )
         raise HTTPException(
             status_code=502,
             detail="Impossible de télécharger les tuiles IGN. Vérifiez votre connexion internet.",
@@ -300,7 +340,7 @@ def _cache_set(key: str, value) -> None:
 
 async def _nominatim_get(path: str, params: Dict):
     timeout = aiohttp.ClientTimeout(total=12)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    async with client_session(timeout=timeout) as session:
         async with session.get(NOMINATIM + path, params=params, headers=NOMINATIM_HEADERS) as resp:
             if resp.status != 200:
                 raise HTTPException(status_code=502, detail="Géocodage indisponible")
@@ -369,7 +409,7 @@ async def route(body: RouteRequest):
 
     timeout = aiohttp.ClientTimeout(total=20)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with client_session(timeout=timeout) as session:
             async with session.get(url, params={"overview": "full", "geometries": "geojson"}) as resp:
                 if resp.status != 200:
                     raise HTTPException(status_code=502, detail="Calcul d'itinéraire indisponible")
@@ -387,6 +427,7 @@ if __name__ == "__main__":
     # Passer l'objet `app` (et pas la chaîne "main:app") : PyInstaller
     # ne sait pas réimporter le module une fois l'exécutable gelé.
     logger.info("Dossier de données : %s", data_dir())
+    logger.info("Journal : %s", log_path())
     uvicorn.run(
         app,
         host="127.0.0.1",

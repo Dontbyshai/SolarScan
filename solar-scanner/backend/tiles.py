@@ -17,6 +17,7 @@ import aiohttp
 from PIL import Image
 
 from geo_utils import ign_tile_url, tile_to_bounds
+from http_ssl import client_session
 from paths import cache_dir
 
 logger = logging.getLogger(__name__)
@@ -168,10 +169,16 @@ async def download_tile(session: aiohttp.ClientSession, url: str) -> Optional[by
                 logger.warning(f"Tile {url} returned HTTP {resp.status}")
                 return None
     except asyncio.TimeoutError:
-        logger.warning(f"Timeout downloading tile: {url}")
+        logger.warning("Délai dépassé pour la tuile %s", url)
         return None
     except Exception as e:
-        logger.error(f"Error downloading tile {url}: {e}")
+        logger.error(
+            "Erreur de téléchargement de tuile %s : %s: %s",
+            url,
+            type(e).__name__,
+            e,
+            exc_info=True,
+        )
         return None
 
 
@@ -186,9 +193,8 @@ async def download_tiles_batch(
     results: Dict[str, bytes] = {}
     total = len(tile_infos)
 
-    # Vérification SSL laissée active : les tuiles IGN sont servies en HTTPS valide.
-    connector = aiohttp.TCPConnector(limit=4)
-    async with aiohttp.ClientSession(connector=connector) as session:
+    # SSL vérifié avec le bundle certifi (voir http_ssl.py).
+    async with client_session(limit=4) as session:
         for i, tile in enumerate(tile_infos):
             url = tile["url"]
             logger.debug(f"Downloading tile {i+1}/{total}: {url}")

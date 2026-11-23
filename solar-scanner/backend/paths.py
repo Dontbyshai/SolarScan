@@ -45,6 +45,11 @@ def cache_dir() -> Path:
     return path
 
 
+def log_path() -> Path:
+    """Journal du moteur, dans le dossier utilisateur."""
+    return data_dir() / "backend.log"
+
+
 def model_path() -> Path:
     """Emplacement du poids YOLO, toujours dans le dossier utilisateur."""
     path = data_dir() / "model" / "solar_detector.pt"
