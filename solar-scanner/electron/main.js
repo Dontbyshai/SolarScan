@@ -144,15 +144,18 @@ function backendEnv() {
 
 function isPortOpen() {
   return new Promise((resolve) => {
-    const req = http.get(`http://127.0.0.1:${BACKEND_PORT}/health`, (res) => {
-      res.resume();
-      resolve(res.statusCode === 200);
-    });
-    req.on('error', () => resolve(false));
-    req.setTimeout(400, () => {
-      req.destroy();
-      resolve(false);
-    });
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    const req = http.get(
+      { host: '127.0.0.1', port: BACKEND_PORT, path: '/health', agent: false, timeout: 1500 },
+      (res) => {
+        res.resume();
+        res.on('end', () => req.destroy());
+        done(res.statusCode === 200);
+      }
+    );
+    req.on('error', () => done(false));
+    req.on('timeout', () => { req.destroy(); done(false); });
   });
 }
 
@@ -192,22 +195,38 @@ function startPythonBackend() {
 
 function waitForBackend(retries = 240, delay = 500) {
   return new Promise((resolve, reject) => {
+    let finished = false;
+
     function attempt(n) {
-      const req = http.get(`http://127.0.0.1:${BACKEND_PORT}/health`, (res) => {
-        res.resume();
-        if (res.statusCode === 200) {
+      if (finished) return;
+      let settled = false; // une seule issue par tentative (évite les boucles en double)
+      const done = (ok) => {
+        if (settled || finished) return;
+        settled = true;
+        if (ok) {
+          finished = true;
           console.log('[Electron] Moteur prêt.');
           resolve();
         } else {
           retry(n);
         }
-      });
-      req.on('error', () => retry(n));
-      req.setTimeout(400, () => { req.destroy(); retry(n); });
+      };
+      const req = http.get(
+        { host: '127.0.0.1', port: BACKEND_PORT, path: '/health', agent: false, timeout: 3000 },
+        (res) => {
+          res.resume();
+          res.on('end', () => req.destroy());
+          done(res.statusCode === 200);
+        }
+      );
+      req.on('error', () => done(false));
+      req.on('timeout', () => { req.destroy(); done(false); });
     }
 
     function retry(n) {
+      if (finished) return;
       if (n <= 0) {
+        finished = true;
         reject(new Error('Le moteur n\'a pas démarré à temps'));
         return;
       }
