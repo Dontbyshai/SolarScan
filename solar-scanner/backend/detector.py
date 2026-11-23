@@ -1,8 +1,10 @@
 """
 detector.py — Pipeline de détection de panneaux solaires
 
-Mode 1 (YOLO) : si solar_detector.pt est dans le dossier utilisateur
-Mode 2 (Heuristique) : couleur bleue sombre, plafonnée à 70 % de confiance
+Mode 1 (YOLO) : solar_detector.pt est embarqué dans l'application
+  (finloop/yolov8s-seg-solar-panels) et recopié dans le dossier utilisateur.
+Mode 2 (Heuristique V1) : si le modèle ne charge pas, masque couleur large
+  comme dans SolarScan 1.0 (bleu + gris), qui détectait bien les panneaux.
 
 Le pipeline retourne des détections GeoJSON-compatible.
 """
@@ -23,12 +25,22 @@ from geo_utils import (
 )
 from paths import resolve_model_path
 
+# torchvision doit être importé (et ses ops C++ enregistrés) avant YOLO.
+# Dans l'exécutable gelé, le runtime hook fait la même chose au démarrage.
+try:
+    import torch  # noqa: F401
+    import torchvision  # noqa: F401
+    import torchvision.ops  # noqa: F401
+except Exception:
+    # L'heuristique reste disponible si torch/torchvision manque.
+    pass
+
 logger = logging.getLogger(__name__)
 
 # ── Model paths ────────────────────────────────────────────────────────────────
-MIN_PANEL_AREA_PX = 400      # Filtre les trop petits objets
-MAX_PANEL_AREA_PX = 250_000  # Filtre les régions aberrantes (toits, routes)
-CONFIDENCE_HEURISTIC = 0.55  # Base du mode sans modèle (plafonnée à 0,70)
+MIN_PANEL_AREA_PX = 400      # Filtre les trop petits objets (~6m² à zoom 19)
+MAX_PANEL_AREA_PX = 200_000  # Filtre les régions aberrantes (comme V1)
+CONFIDENCE_HEURISTIC = 0.65  # Confiance de base du mode heuristique V1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,6 +49,9 @@ CONFIDENCE_HEURISTIC = 0.55  # Base du mode sans modèle (plafonnée à 0,70)
 
 class YoloDetector:
     def __init__(self, model_path: Path):
+        import torch  # noqa: F401
+        import torchvision  # noqa: F401
+        import torchvision.ops  # noqa: F401
         from ultralytics import YOLO
         self.model = YOLO(str(model_path))
         logger.info(f"YOLOv8 model loaded from: {model_path.name}")
@@ -122,35 +137,24 @@ class HeuristicDetector:
 
         h, w = img_bgr.shape[:2]
 
-        # ── Masque couleur PV (volontairement étroit) ──────────────────────
-        # Sans modèle, l'ancienne plage prenait presque tout le gris et le bleu
-        # de l'image (routes, toits clairs, ombres). On ne garde que :
-        #   - le silicium bleu sombre (pas le ciel, pas une piscine vive)
-        #   - le noir/gris très sombre, et seulement s'il tire vers le bleu
-        # La saturation peut être forte sur une cellule bleue nette.
-        # C'est le plafond de luminosité (V <= 130) qui écarte le ciel et les piscines.
-        mask_pv_blue = cv2.inRange(
-            img_hsv,
-            np.array([100, 35, 25]),
-            np.array([130, 255, 130]),
+        # ── Masque couleur PV (V1) ───────────────────────────────────────
+        # Bleu / Violet (tolérance totale sur Saturation et Luminosité)
+        mask_pv_blue = cv2.inRange(img_hsv,
+            np.array([70, 0, 0]),
+            np.array([160, 255, 255])
         )
 
-        mask_dark = cv2.inRange(
-            img_hsv,
-            np.array([0, 0, 15]),
-            np.array([180, 50, 90]),
+        # Gris / Noir / Blanc (toute teinte, mais saturation faible/moyenne < 85)
+        mask_dark_gray = cv2.inRange(img_hsv,
+            np.array([0, 0, 0]),
+            np.array([180, 85, 255])
         )
-        # Canal b LAB : 128 est neutre, en dessous c'est bleuté (pas une tuile rouge).
-        blueish = np.where(img_lab[:, :, 2] < 140, 255, 0).astype(np.uint8)
-        mask_dark = cv2.bitwise_and(mask_dark, blueish)
 
-        mask_combined = cv2.bitwise_or(mask_pv_blue, mask_dark)
+        mask_combined = cv2.bitwise_or(mask_pv_blue, mask_dark_gray)
 
-        # Végétation et surfaces claires (béton, toiture zinc, neige)
-        mask_veg = cv2.inRange(img_hsv, np.array([35, 40, 0]), np.array([95, 255, 255]))
-        mask_bright = cv2.inRange(img_hsv, np.array([0, 0, 150]), np.array([180, 80, 255]))
+        # ── EXCLUSION VEGETATION ───────────────────────────────────────────
+        mask_veg = cv2.inRange(img_hsv, np.array([35, 40, 0]), np.array([85, 255, 255]))
         mask_final = cv2.bitwise_and(mask_combined, cv2.bitwise_not(mask_veg))
-        mask_final = cv2.bitwise_and(mask_final, cv2.bitwise_not(mask_bright))
 
         # (On supprime le masque de texture car les grilles des gros panneaux créent trop de variance)
 
@@ -167,7 +171,8 @@ class HeuristicDetector:
         detections = []
         for cnt in contours:
             area_px = cv2.contourArea(cnt)
-            if area_px < MIN_PANEL_AREA_PX or area_px > MAX_PANEL_AREA_PX:
+            # V1 : accepter les grands champs (MAX 1_000_000), pas seulement 250k.
+            if area_px < MIN_PANEL_AREA_PX or area_px > 1_000_000:
                 continue
 
             # Rectangularité (ratio aire réelle / aire minAreaRect orientée)
@@ -177,33 +182,30 @@ class HeuristicDetector:
             box_area = cv2.contourArea(box)
             rect_ratio = area_px / box_area if box_area > 0 else 0
 
-            # Un panneau coupé par le bord de l'image est un peu moins rectangulaire,
-            # mais une route ou une ombre ne doit plus passer avec un seuil à 0,30.
-            if area_px > 8000:
-                if rect_ratio < 0.50:
+            # Pour les grands panneaux, les ombres ou les découpes par la limite
+            # de la tuile déforment la boîte. On est tolérant sur le ratio (V1).
+            if area_px > 2000:
+                if rect_ratio < 0.30:
                     continue
-            elif rect_ratio < 0.62:
-                continue
+            else:
+                if rect_ratio < 0.60:
+                    continue
 
             # Compacité (circulaire = 1, carré = ~0.785)
             perimeter = cv2.arcLength(cnt, True)
             compactness = (4 * math.pi * area_px) / (perimeter ** 2) if perimeter > 0 else 0
 
-            # Aspect ratio (une route toute en longueur n'est pas un panneau)
+            # Aspect ratio (les panneaux ont un ratio raisonnable)
             aspect = max(bw, bh) / max(min(bw, bh), 1)
-            if aspect > 5:
-                continue
 
-            # Le mode heuristique ne doit jamais s'afficher comme une « haute
-            # confiance » : ce vert est réservé au modèle YOLO.
+            # Score de confiance heuristique V1 (peut monter à 0,88)
             conf = CONFIDENCE_HEURISTIC
-            if rect_ratio > 0.75:
-                conf += 0.08
-            if 1.15 <= aspect <= 3.2:
-                conf += 0.05
+            if rect_ratio > 0.7:
+                conf = min(conf + 0.1, 0.88)
+            if aspect > 5:
+                conf = max(conf - 0.15, 0.40)
             if area_px < 800:
-                conf -= 0.08
-            conf = max(0.40, min(conf, 0.70))
+                conf = max(conf - 0.10, 0.40)
 
             # Approx polygone
             epsilon = 0.02 * cv2.arcLength(cnt, True)
@@ -243,26 +245,61 @@ class HeuristicDetector:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _yolo_detector: Optional[YoloDetector] = None
+_yolo_tried = False
+_engine_reason: Optional[str] = None
 _heuristic_detector = HeuristicDetector()
 
 
 def engine_name() -> str:
-    """'yolo' si le poids est chargé, sinon 'heuristique'."""
+    """'yolo' si le poids est chargé et a passé l'auto-test, sinon 'heuristique'."""
     return "yolo" if _get_detector() else "heuristique"
 
 
-def _get_detector():
-    global _yolo_detector
-    model_file = resolve_model_path()
-    if model_file.exists() and _yolo_detector is None:
-        try:
-            _yolo_detector = YoloDetector(model_file)
-            logger.info("Détecteur YOLOv8 chargé")
-        except Exception as e:
-            logger.warning(f"Modèle YOLO illisible ({e}). Repli sur l'heuristique.")
-            _yolo_detector = None
+def engine_reason() -> Optional[str]:
+    """Pourquoi l'heuristique est utilisée, ou None si YOLO est actif."""
+    _get_detector()
+    return _engine_reason
 
-    return _yolo_detector if _yolo_detector else None
+
+def _disable_yolo(exc: BaseException) -> None:
+    """Mémorise l'échec YOLO pour /health et les analyses suivantes."""
+    global _yolo_detector, _yolo_tried, _engine_reason
+    _yolo_detector = None
+    _yolo_tried = True
+    message = f"{type(exc).__name__}: {exc}"
+    _engine_reason = message[:300]
+    logger.warning("Repli sur l'heuristique (%s).", _engine_reason)
+
+
+def _self_test_yolo(detector: "YoloDetector") -> None:
+    """Une inférence à blanc : attrape le nms manquant dès le chargement."""
+    blank = Image.new("RGB", (256, 256), (0, 0, 0))
+    detector.detect(blank)
+
+
+def _get_detector():
+    global _yolo_detector, _yolo_tried, _engine_reason
+    if _yolo_tried:
+        return _yolo_detector
+
+    _yolo_tried = True
+    model_file = resolve_model_path()
+    if not model_file.exists():
+        _engine_reason = "modèle YOLO absent"
+        logger.warning("Aucun poids YOLO trouvé. Repli sur l'heuristique.")
+        return None
+
+    try:
+        detector = YoloDetector(model_file)
+        _self_test_yolo(detector)
+        _yolo_detector = detector
+        _engine_reason = None
+        logger.info("Détecteur YOLOv8 chargé")
+        return _yolo_detector
+    except Exception as exc:
+        logger.warning("Modèle YOLO inutilisable (%s). Repli sur l'heuristique.", exc, exc_info=True)
+        _disable_yolo(exc)
+        return None
 
 
 def analyze_image(
@@ -286,12 +323,20 @@ def analyze_image(
     lat_center = (composite_bounds["north"] + composite_bounds["south"]) / 2
 
     detector = _get_detector()
+    raw_detections: List[Dict] = []
 
     if detector:
-        # ONNX pipeline (à compléter avec fine-tuned model)
-        raw_detections = detector.detect(image)
+        try:
+            raw_detections = detector.detect(image)
+        except Exception as exc:
+            logger.warning(
+                "YOLO a échoué pendant l'analyse (%s). Repli sur l'heuristique.",
+                exc,
+                exc_info=True,
+            )
+            _disable_yolo(exc)
+            raw_detections = _heuristic_detector.detect(image)
     else:
-        # Heuristic pipeline
         raw_detections = _heuristic_detector.detect(image)
 
     results = []

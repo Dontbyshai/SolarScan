@@ -2,9 +2,9 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; img-src 'self' data: blob: solarscan: file: https://unpkg.com https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org https://data.geopf.fr https://tilecache.rainviewer.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:8765 https://api.rainviewer.com; frame-src https://maps.google.com https://www.google.com;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: blob: solarscan: file: https://unpkg.com https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org https://data.geopf.fr https://tilecache.rainviewer.com; font-src 'self' data:; connect-src 'self' http://127.0.0.1:8765 https://api.rainviewer.com; frame-src https://maps.google.com https://www.google.com;" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SolarScan 1.5.1 — Détection de Panneaux Solaires</title>
+  <title>SolarScan 1.6.0 — Détection de Panneaux Solaires</title>
   <meta name="description" content="Application de détection automatique de panneaux solaires par imagerie satellite IGN pour estimations de nettoyage." />
 
   <!-- Leaflet CSS (CDN) -->
@@ -15,37 +15,49 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-<!-- DEBUG ERROR HANDLER -->
 <script>
-  window.addEventListener('error', function(e) {
-    const errDiv = document.createElement('div');
-    errDiv.style.position = 'fixed';
-    errDiv.style.top = '0';
-    errDiv.style.left = '0';
-    errDiv.style.right = '0';
-    errDiv.style.background = 'red';
-    errDiv.style.color = 'white';
-    errDiv.style.zIndex = '999999';
-    errDiv.style.padding = '10px';
-    errDiv.style.fontFamily = 'monospace';
-    errDiv.innerHTML = '<b>JS ERROR:</b> ' + e.message + '<br>Line: ' + e.lineno + '<br>File: ' + e.filename;
-    document.body.appendChild(errDiv);
-  });
-  window.addEventListener('unhandledrejection', function(e) {
-    const errDiv = document.createElement('div');
-    errDiv.style.position = 'fixed';
-    errDiv.style.top = '50px';
-    errDiv.style.left = '0';
-    errDiv.style.right = '0';
-    errDiv.style.background = 'orange';
-    errDiv.style.color = 'black';
-    errDiv.style.zIndex = '999999';
-    errDiv.style.padding = '10px';
-    errDiv.style.fontFamily = 'monospace';
-    errDiv.innerHTML = '<b>PROMISE ERROR:</b> ' + (e.reason ? e.reason.message : 'Unknown');
-    document.body.appendChild(errDiv);
-  });
+  (function () {
+    var mac = /Mac|iPhone|iPad/.test(navigator.platform || '') || /Mac OS X/.test(navigator.userAgent || '');
+    var electron = /Electron/i.test(navigator.userAgent || '');
+    if (mac && electron) document.documentElement.classList.add('is-mac-electron');
+  })();
 </script>
+
+<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+  <symbol id="i-map" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></symbol>
+  <symbol id="i-satellite" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7 L17 11"/><path d="M19 5 L21 3"/><path d="M16 4 L20 8"/><circle cx="9" cy="15" r="2"/><path d="M11 13 L14 10"/><path d="M7 17 L4 21"/><path d="M5 13 L3 14 L4 16"/><path d="M13 19 L14 21 L16 20"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 19h10a4 4 0 0 0 0-8 6 6 0 0 0-11.5-1.5A4 4 0 0 0 7 19z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.4-3.4"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-rect" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="12" rx="1"/></symbol>
+  <symbol id="i-poly" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 3 20 8.5 17.5 18 6.5 18 4 8.5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M7 7l1 13h8l1-13"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-zoom-in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/><path d="M11 8v6M8 11h6"/></symbol>
+  <symbol id="i-zoom-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/><path d="M8 11h6"/></symbol>
+  <symbol id="i-locate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M15 4v16"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-folder-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h7l2 2h9v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 8V6a1 1 0 0 1 1-1h5l2 2"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 17h16"/><circle cx="8" cy="7" r="2"/><circle cx="16" cy="17" r="2"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 7h5a3 3 0 0 1 3 3v7"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="M8 12l4 4 4-4"/><path d="M5 20h14"/></symbol>
+  <symbol id="i-invoice" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v4h4"/><path d="M9 12h6M9 16h6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14l6-6 6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10l6 6 6-6"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 4.7 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.7a2 2 0 0 0-3.4 0z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="1"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5h5v5"/><path d="M19 5 10 14"/><path d="M5 9v10h10"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v6l4 2"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h8"/><path d="M8 16h8"/></symbol>
+</svg>
 
 <div id="app">
 
@@ -62,8 +74,8 @@
     <div class="toolbar-group">
       <span class="toolbar-label">Fond</span>
       <div class="layer-toggle" role="group" aria-label="Sélection du fond de carte">
-        <button class="layer-btn active" id="btn-osm" aria-pressed="true">🗺 OSM</button>
-        <button class="layer-btn" id="btn-ign" aria-pressed="false">🛰 IGN</button>
+        <button class="layer-btn active" id="btn-osm" aria-pressed="true"><svg class="icon" aria-hidden="true"><use href="#i-map"></use></svg> OSM</button>
+        <button class="layer-btn" id="btn-ign" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-satellite"></use></svg> IGN</button>
       </div>
     </div>
 
@@ -73,7 +85,7 @@
     <div class="toolbar-group">
       <span class="toolbar-label">Calques</span>
       <div class="layer-toggle" role="group" aria-label="Sélection des calques">
-        <button class="layer-btn" id="btn-meteo" aria-pressed="false">🌧 Météo</button>
+        <button class="layer-btn" id="btn-meteo" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-cloud"></use></svg> Météo</button>
       </div>
     </div>
 
@@ -83,13 +95,13 @@
     <div class="toolbar-group">
       <span class="toolbar-label">Action</span>
       <button class="btn btn-accent" id="btn-scan-view" title="Analyser la vue actuelle (zoom ≥ 17)">
-        🔍 Scanner
+        <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg> Scanner
       </button>
       <button class="btn btn-ghost" id="btn-mode-draw" title="Dessiner manuellement un panneau">
-        ✏️ Créer
+        <svg class="icon" aria-hidden="true"><use href="#i-pencil"></use></svg> Créer
       </button>
       <button class="btn btn-ghost" id="btn-mode-edit" title="Modifier les tracés existants">
-        ✍️ Éditer
+        <svg class="icon" aria-hidden="true"><use href="#i-pencil"></use></svg> Éditer
       </button>
     </div>
 
@@ -97,12 +109,12 @@
 
     <!-- Actions de dessin (visible en mode manuel) -->
     <div class="toolbar-group" id="draw-controls" style="display:none">
-      <button class="btn btn-ghost btn-icon" id="btn-draw-rect" title="Dessiner un rectangle">⬜</button>
-      <button class="btn btn-ghost btn-icon" id="btn-draw-poly" title="Dessiner un polygone">⬡</button>
-      <button class="btn btn-ghost btn-icon btn-danger" id="btn-draw-clear" title="Effacer les zones">🗑</button>
+      <button class="btn btn-ghost btn-icon" id="btn-draw-rect" title="Dessiner un rectangle"><svg class="icon" aria-hidden="true"><use href="#i-rect"></use></svg></button>
+      <button class="btn btn-ghost btn-icon" id="btn-draw-poly" title="Dessiner un polygone"><svg class="icon" aria-hidden="true"><use href="#i-poly"></use></svg></button>
+      <button class="btn btn-ghost btn-icon btn-danger" id="btn-draw-clear" title="Effacer les zones"><svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg></button>
       <div class="toolbar-divider"></div>
       <button class="btn btn-accent" id="btn-analyze-zone" disabled>
-        ✅ Ajouter manuellement
+        <svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg> Ajouter manuellement
       </button>
     </div>
 
@@ -112,7 +124,7 @@
     <div class="toolbar-group">
       <div class="search-container">
         <input type="text" id="search-input" placeholder="Rechercher une adresse..." autocomplete="off" />
-        <button id="btn-search" title="Rechercher">🔍</button>
+        <button id="btn-search" title="Rechercher" type="button"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></button>
       </div>
     </div>
 
@@ -120,17 +132,17 @@
 
     <!-- Contrôles de vue carte -->
     <div class="toolbar-group">
-      <button class="btn btn-ghost btn-icon" id="btn-zoom-in" title="Zoom avant">＋</button>
-      <button class="btn btn-ghost btn-icon" id="btn-zoom-out" title="Zoom arrière">－</button>
-      <button class="btn btn-ghost btn-icon" id="btn-locate" title="Aller à ma position">◎</button>
+      <button class="btn btn-ghost btn-icon" id="btn-zoom-in" title="Zoom avant"><svg class="icon" aria-hidden="true"><use href="#i-zoom-in"></use></svg></button>
+      <button class="btn btn-ghost btn-icon" id="btn-zoom-out" title="Zoom arrière"><svg class="icon" aria-hidden="true"><use href="#i-zoom-out"></use></svg></button>
+      <button class="btn btn-ghost btn-icon" id="btn-locate" title="Aller à ma position"><svg class="icon" aria-hidden="true"><use href="#i-locate"></use></svg></button>
     </div>
 
     <div class="toolbar-divider"></div>
 
     <!-- Settings -->
     <div class="toolbar-group">
-      <button class="btn btn-ghost btn-icon" id="btn-settings" title="Paramètres de facturation">⚙</button>
-      <button class="btn btn-ghost btn-icon" id="btn-sidebar-toggle" title="Afficher/masquer le panneau">◧</button>
+      <button class="btn btn-ghost btn-icon" id="btn-settings" title="Paramètres de facturation"><svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg></button>
+      <button class="btn btn-ghost btn-icon" id="btn-sidebar-toggle" title="Afficher/masquer le panneau"><svg class="icon" aria-hidden="true"><use href="#i-panel"></use></svg></button>
     </div>
 
     <!-- Backend status -->
@@ -185,7 +197,7 @@
             <div class="stat-label">Surface totale</div>
             <div class="stat-value" id="stat-area">0<span class="stat-unit">m²</span></div>
           </div>
-          <div class="stat-card" style="grid-column: 1 / -1;">
+          <div class="stat-card stat-wide">
             <div class="stat-label">Estimation nettoyage HT</div>
             <div class="stat-value" id="stat-price">0<span class="stat-unit">€</span></div>
           </div>
@@ -195,59 +207,61 @@
       <div class="confidence-tools">
         <label for="confidence-min">Confiance minimum : <strong id="confidence-min-label">0 %</strong></label>
         <input type="range" id="confidence-min" min="0" max="90" step="5" value="0" />
-        <button class="btn btn-ghost" id="btn-merge-duplicates" type="button" disabled>
+        <button class="btn btn-secondary" id="btn-merge-duplicates" type="button" disabled title="Fusionner les détections à moins de 15 m">
           Fusionner les doublons
         </button>
       </div>
 
-      <!-- Detection items list -->
-      <div class="detection-list" id="detection-list">
-        <div class="empty-state">
-          <div class="empty-icon">🛰</div>
-          <div class="empty-title">Aucune détection</div>
-          <div class="empty-desc">Cliquez sur Scanner (zoom ≥ 17, fond IGN) ou dessinez un panneau.</div>
+      <div class="sidebar-body">
+        <div class="detection-list" id="detection-list">
+          <div class="empty-state">
+            <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-satellite"></use></svg></div>
+            <div class="empty-title">Aucune détection</div>
+            <div class="empty-desc">Cliquez sur Scanner (zoom ≥ 17, fond IGN) ou dessinez un panneau.</div>
+          </div>
         </div>
+        <div id="business-options-container" class="business-options-container"></div>
       </div>
 
-      <!-- Business Options -->
-      <div id="business-options-container" class="business-options-container">
-        <!-- Rendered via JS -->
-      </div>
-      
-      <!-- Tournée Header -->
-      <div style="padding: 10px 15px; border-bottom: 1px solid var(--border-light); background: var(--surface); display: flex; gap: 8px;">
-        <button class="btn btn-ghost" id="btn-add-tournee-quick" title="Ajouter le scan actuel à la tournée" style="padding: 0 12px; border: 1px solid var(--accent); color: var(--accent);">
-          ➕
+      <div class="tournee-row">
+        <button class="btn btn-ghost" id="btn-add-tournee-quick" title="Ajouter le scan actuel à la tournée">
+          <svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>
+          <span>Ajouter</span>
         </button>
-        <button class="btn btn-accent" id="btn-open-tournee" style="flex: 1; justify-content: center;">
-          🚗 Ma Tournée (0)
+        <button class="btn btn-accent" id="btn-open-tournee">
+          <svg class="icon" aria-hidden="true"><use href="#i-route"></use></svg> Ma Tournée (0)
         </button>
       </div>
 
       <!-- Export footer -->
       <div class="sidebar-footer">
-        <div class="export-row" style="margin-bottom: 8px;">
+        <div class="export-row">
           <button class="btn btn-ghost" id="btn-save-project" title="Sauvegarder le projet (.solar)">
-            💾
+            <svg class="icon" aria-hidden="true"><use href="#i-save"></use></svg>
+            <span>Sauver</span>
           </button>
           <button class="btn btn-ghost" id="btn-open-project" title="Ouvrir un projet (.solar)">
-            📂
+            <svg class="icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
+            <span>Ouvrir</span>
           </button>
-          <button class="btn btn-ghost" id="btn-manage-options">
-            ⚙️ Options
+          <button class="btn btn-ghost" id="btn-manage-options" title="Options d'intervention">
+            <svg class="icon" aria-hidden="true"><use href="#i-sliders"></use></svg>
+            <span>Options</span>
           </button>
           <button class="btn btn-ghost" id="btn-export-csv" disabled title="Exporter en CSV">
-            📊 CSV
+            <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
+            <span>CSV</span>
           </button>
           <button class="btn btn-ghost" id="btn-history" title="Historique des devis">
-            🕘
+            <svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg>
+            <span>Historique</span>
           </button>
         </div>
-        <button class="btn btn-accent" id="btn-export-pdf" style="width:100%; justify-content:center; margin-bottom: 8px;" disabled>
-          📄 Générer Facture
+        <button class="btn btn-accent btn-block" id="btn-export-pdf" disabled>
+          <svg class="icon" aria-hidden="true"><use href="#i-invoice"></use></svg> Générer le devis
         </button>
-        <button class="btn btn-danger" id="btn-clear-results" style="width:100%; justify-content:center;" disabled>
-          🗑 Effacer les résultats
+        <button class="btn btn-danger btn-block" id="btn-clear-results" disabled>
+          <svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg> Effacer les résultats
         </button>
       </div>
 
@@ -267,7 +281,7 @@
         Configurez les informations de votre entreprise pour la génération des devis et ajustez les paramètres de l'IA.
       </p>
 
-      <div style="display: flex; gap: 24px;">
+      <div class="modal-body" style="display: flex; gap: 24px;">
         <!-- Colonne Gauche: Société -->
         <div style="flex: 1;">
           <h4 style="margin-top: 0; margin-bottom: 12px; font-size: 13px; color: #333; text-transform: uppercase;">Société</h4>
@@ -404,7 +418,7 @@
       </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="btn-client-cancel">Annuler</button>
-        <button class="btn btn-accent" id="btn-client-confirm">Générer le PDF 📄</button>
+        <button class="btn btn-accent" id="btn-client-confirm"><svg class="icon" aria-hidden="true"><use href="#i-invoice"></use></svg> Générer le PDF</button>
       </div>
     </div>
   </div>
@@ -426,7 +440,7 @@
       </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="btn-tournee-add-cancel" style="margin-right: auto;">Annuler</button>
-        <button class="btn btn-accent" id="btn-tournee-add-confirm">Ajouter 📍</button>
+        <button class="btn btn-accent" id="btn-tournee-add-confirm"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg> Ajouter</button>
       </div>
     </div>
   </div>
@@ -445,7 +459,7 @@
       </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="btn-tournee-edit-cancel" style="margin-right: auto;">Annuler</button>
-        <button class="btn btn-accent" id="btn-tournee-edit-confirm">Enregistrer 💾</button>
+        <button class="btn btn-accent" id="btn-tournee-edit-confirm"><svg class="icon" aria-hidden="true"><use href="#i-save"></use></svg> Enregistrer</button>
       </div>
     </div>
   </div>
@@ -490,13 +504,13 @@
     <div class="modal-content" style="width: 650px; max-width: 95vw;">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
         <div>
-          <h3 style="margin: 0 0 5px 0;">🚗 Optimisation de Tournée</h3>
+          <h3 style="margin: 0 0 5px 0;"><svg class="icon" aria-hidden="true"><use href="#i-route"></use></svg> Optimisation de tournée</h3>
           <p style="margin: 0; font-size: 12px; color: #666;">
             Générez l'itinéraire le plus court pour relier vos différents clients.
           </p>
         </div>
         <button class="btn btn-ghost btn-small" id="btn-clear-tournee" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3);">
-          🗑️ Vider
+          <svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg> Vider
         </button>
       </div>
       
@@ -531,9 +545,9 @@
 
       <div class="modal-actions">
         <button class="btn btn-ghost" id="btn-close-tournee">Fermer</button>
-        <button class="btn btn-ghost" id="btn-export-tournee" type="button">📄 Feuille de route</button>
-        <button class="btn btn-ghost" id="btn-gmaps-tournee" type="button" style="display: none; border-color: #4285F4; color: #4285F4;">Ouvrir dans Google Maps 🗺️</button>
-        <button class="btn btn-accent" id="btn-calc-tournee">Calculer l'itinéraire 🗺️</button>
+        <button class="btn btn-ghost" id="btn-export-tournee" type="button"><svg class="icon" aria-hidden="true"><use href="#i-file"></use></svg> Feuille de route</button>
+        <button class="btn btn-ghost" id="btn-gmaps-tournee" type="button" style="display: none; border-color: #4285F4; color: #4285F4;"><svg class="icon" aria-hidden="true"><use href="#i-external"></use></svg> Ouvrir dans Google Maps</button>
+        <button class="btn btn-accent" id="btn-calc-tournee"><svg class="icon" aria-hidden="true"><use href="#i-route"></use></svg> Calculer l'itinéraire</button>
       </div>
     </div>
   </div>
@@ -554,6 +568,7 @@
               <th>Client</th>
               <th>Adresse</th>
               <th style="text-align: right;">TTC</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="history-tbody"></tbody>
@@ -571,7 +586,7 @@
     <div style="background: white; border-radius: 8px; width: 100%; height: 100%; max-width: 1200px; max-height: 800px; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.5); overflow: hidden;">
       <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
         <h3 style="margin: 0; font-size: 16px; color: #334155; display: flex; align-items: center; gap: 8px;">
-          <span>👁️</span> Street View
+          <svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg> Street View
         </h3>
         <button id="btn-close-sv" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #64748b; line-height: 1;">&times;</button>
       </div>

@@ -8,7 +8,19 @@ opencv-python-headless>=4.9.0
 shapely>=2.0.3
 geojson>=3.1.0
 aiohttp>=3.9.3
+certifi>=2024.0.0
 aiosqlite>=0.20.0
 scipy>=1.13.0
 ultralytics>=8.0.0
 huggingface_hub>=0.20.0
+# torchvision 0.29.x est ABI-stable avec torch>=2.14 (roue py3-none).
+# Sans pin, pip peut mélanger des versions dont les ops C++ (nms)
+# ne s'enregistrent pas dans l'exécutable PyInstaller.
+torch>=2.14.0,<2.16
+torchvision>=0.29.1,<0.30
+# setuptools 82 a retiré pkg_resources. Sur le CI Mac, pip passe de
+# setuptools 65.5.0 à 84 et laisse un dossier pkg_resources vide.
+# PyInstaller embarque alors le hook pyi_rth_pkgres, qui plante au
+# démarrage du moteur : AttributeError NullProvider.
+# torch exige setuptools>=77.0.3, donc on reste en 77.x–81.x.
+setuptools>=77.0.3,<82

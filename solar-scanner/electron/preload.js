@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('solarAPI', {
   exportCSV: (rows) => ipcRenderer.invoke('export-csv', rows),
   exportPDF: (html, suggestedName) => ipcRenderer.invoke('export-pdf', html, suggestedName),
   captureRect: (rect) => ipcRenderer.invoke('capture-rect', rect),
+  logError: (message, detail) => ipcRenderer.invoke('log-error', message, detail),
+  openHistoryFile: (filePath) => ipcRenderer.invoke('open-history-file', filePath),
+  reexportHistoryFile: (filePath) => ipcRenderer.invoke('reexport-history-file', filePath),
 
   // Cache
   clearCache: () => ipcRenderer.invoke('clear-cache'),

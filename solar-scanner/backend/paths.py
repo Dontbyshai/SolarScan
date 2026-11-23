@@ -45,6 +45,11 @@ def cache_dir() -> Path:
     return path
 
 
+def log_path() -> Path:
+    """Journal du moteur, dans le dossier utilisateur."""
+    return data_dir() / "backend.log"
+
+
 def model_path() -> Path:
     """Emplacement du poids YOLO, toujours dans le dossier utilisateur."""
     path = data_dir() / "model" / "solar_detector.pt"
@@ -52,24 +57,44 @@ def model_path() -> Path:
     return path
 
 
+def bundled_model_path() -> Path:
+    """
+    Emplacement du poids YOLO livré avec l'application.
+    Dans l'exécutable PyInstaller, le fichier est extrait dans _MEIPASS/model/.
+    """
+    candidates = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "model" / "solar_detector.pt")
+        candidates.append(Path(sys.executable).resolve().parent / "model" / "solar_detector.pt")
+    candidates.append(
+        Path(__file__).resolve().parent.parent / "assets" / "model" / "solar_detector.pt"
+    )
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[-1]
+
+
 def legacy_model_path() -> Path:
     """Ancien emplacement (dépôt / paquet), souvent en lecture seule."""
-    return Path(__file__).resolve().parent.parent / "assets" / "model" / "solar_detector.pt"
+    return bundled_model_path()
 
 
 def resolve_model_path() -> Path:
     """
     Utilise le modèle du dossier utilisateur.
-    S'il n'existe pas encore mais qu'une copie est dans assets/model/,
-    on la recopie une fois pour ne pas perdre un modèle déjà téléchargé.
+    S'il n'existe pas encore, on recopie le poids embarqué (bundle ou assets/).
     """
     dest = model_path()
     if dest.exists():
         return dest
-    legacy = legacy_model_path()
-    if legacy.exists() and legacy.resolve() != dest.resolve():
+    bundled = bundled_model_path()
+    if bundled.exists() and bundled.resolve() != dest.resolve():
         try:
-            shutil.copy2(legacy, dest)
+            shutil.copy2(bundled, dest)
+            return dest
         except OSError:
-            return legacy
+            return bundled
     return dest

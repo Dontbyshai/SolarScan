@@ -14,8 +14,10 @@ from PIL import Image  # noqa: E402
 
 import main  # noqa: E402
 from detector import HeuristicDetector  # noqa: E402
-from paths import cache_dir, model_path, settings_path  # noqa: E402
-from tiles import sanitize_tiles  # noqa: E402
+from http_ssl import ssl_context  # noqa: E402
+from paths import cache_dir, log_path, model_path, settings_path  # noqa: E402
+from geo_utils import tile_to_bounds  # noqa: E402
+from tiles import IGN_NATIVE_MAX_ZOOM, native_tile, sanitize_tiles  # noqa: E402
 
 
 class PathsTests(unittest.TestCase):
@@ -25,6 +27,8 @@ class PathsTests(unittest.TestCase):
         self.assertEqual(model_path().name, "solar_detector.pt")
         self.assertTrue(str(cache_dir()).startswith(_TMP))
         self.assertFalse(str(settings_path()).endswith("assets/settings.json"))
+        self.assertTrue(str(log_path()).startswith(_TMP))
+        self.assertEqual(log_path().name, "backend.log")
 
 
 class TileTests(unittest.TestCase):
@@ -48,6 +52,52 @@ class TileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sanitize_tiles(too_many)
 
+    def test_zoom_21_ramene_au_parent_19_et_dedoublonne(self):
+        # Clermont-Ferrand 45.7775, 3.0819 au zoom carte 21 (cas du journal moteur).
+        x21, y21, z21 = 1066529, 747948, 21
+        x19, y19, z19 = native_tile(x21, y21, z21)
+        self.assertEqual((x19, y19, z19), (266632, 186987, 19))
+        self.assertEqual(z19, IGN_NATIVE_MAX_ZOOM)
+
+        tiles = sanitize_tiles([
+            {"x": 1066528, "y": 747948, "z": 21},
+            {"x": 1066529, "y": 747948, "z": 21},
+            {"x": 1066530, "y": 747948, "z": 21},
+            {"x": 1066529, "y": 747949, "z": 21},
+        ])
+        # Ces quatre tuiles z=21 tombent dans la même tuile parente z=19.
+        self.assertEqual(len(tiles), 1)
+        self.assertEqual(tiles[0]["z"], 19)
+        self.assertEqual(tiles[0]["x"], 266632)
+        self.assertEqual(tiles[0]["y"], 186987)
+        self.assertIn("TILEMATRIX=19", tiles[0]["url"])
+        self.assertNotIn("TILEMATRIX=21", tiles[0]["url"])
+        self.assertEqual(tiles[0]["bounds"], tile_to_bounds(266632, 186987, 19))
+
+    def test_zoom_20_ramene_au_parent_19(self):
+        tiles = sanitize_tiles([{"x": 533264, "y": 373974, "z": 20}])
+        self.assertEqual(tiles[0]["z"], 19)
+        self.assertEqual(tiles[0]["x"], 266632)
+        self.assertEqual(tiles[0]["y"], 186987)
+
+    def test_zoom_19_inchange(self):
+        tiles = sanitize_tiles([{"x": 266632, "y": 186987, "z": 19}])
+        self.assertEqual(len(tiles), 1)
+        self.assertEqual(tiles[0]["z"], 19)
+        self.assertEqual(tiles[0]["x"], 266632)
+        self.assertEqual(tiles[0]["y"], 186987)
+        self.assertEqual(tiles[0]["bounds"], tile_to_bounds(266632, 186987, 19))
+
+    def test_parents_distincts_conserves(self):
+        # Deux tuiles z=21 dans des parents z=19 différents (écart de 4 colonnes).
+        tiles = sanitize_tiles([
+            {"x": 1066528, "y": 747948, "z": 21},
+            {"x": 1066532, "y": 747948, "z": 21},
+        ])
+        self.assertEqual(len(tiles), 2)
+        self.assertEqual({t["x"] for t in tiles}, {266632, 266633})
+        self.assertTrue(all(t["z"] == 19 for t in tiles))
+
 
 class CacheTests(unittest.TestCase):
     def test_cache_nominatim_borne(self):
@@ -60,7 +110,8 @@ class CacheTests(unittest.TestCase):
 
 
 class HeuristicTests(unittest.TestCase):
-    def test_panneau_bleu_seulement(self):
+    def test_panneau_bleu_detecte(self):
+        """L'heuristique V1 doit au moins trouver le rectangle bleu PV."""
         img = Image.new("RGB", (320, 320), (46, 140, 52))
         px = img.load()
         for x in range(40, 130):
@@ -74,9 +125,55 @@ class HeuristicTests(unittest.TestCase):
                 px[x, y] = (42, 42, 46)
 
         found = HeuristicDetector().detect(img)
-        self.assertEqual(len(found), 1, f"détections inattendues : {len(found)}")
-        self.assertLessEqual(found[0]["confidence"], 0.70)
-        self.assertGreaterEqual(found[0]["area_px"], 400)
+        self.assertGreaterEqual(len(found), 1, "aucun panneau détecté")
+        hits_blue = 0
+        for det in found:
+            x, y, bw, bh = det["bbox"]
+            if x <= 85 <= x + bw and y <= 75 <= y + bh:
+                hits_blue += 1
+                self.assertGreaterEqual(det["area_px"], 400)
+                self.assertGreaterEqual(det["confidence"], 0.40)
+                self.assertLessEqual(det["confidence"], 0.88)
+        self.assertGreaterEqual(hits_blue, 1, "le rectangle bleu n'a pas été trouvé")
+
+    def test_poids_yolo_embarque(self):
+        path = Path(__file__).resolve().parent.parent / "assets" / "model" / "solar_detector.pt"
+        self.assertTrue(path.is_file(), f"modèle manquant : {path}")
+        self.assertGreater(path.stat().st_size, 1_000_000)
+
+
+
+    def test_yolo_repli_sur_heuristique(self):
+        """Si l'inférence YOLO lève (ex. nms manquant), on tombe sur l'heuristique."""
+        import detector as det
+
+        img = Image.new("RGB", (320, 320), (46, 140, 52))
+        px = img.load()
+        for x in range(40, 130):
+            for y in range(40, 110):
+                px[x, y] = (28, 52, 108)
+
+        class Boom:
+            def detect(self, _image):
+                raise RuntimeError("operator torchvision::nms does not exist")
+
+        prev_det = det._yolo_detector
+        prev_tried = det._yolo_tried
+        prev_reason = det._engine_reason
+        try:
+            det._yolo_detector = Boom()
+            det._yolo_tried = True
+            det._engine_reason = None
+            bounds = {"north": 43.58, "south": 43.57, "east": 3.87, "west": 3.86}
+            found = det.analyze_image(img, bounds, 19)
+            self.assertIsNone(det._yolo_detector)
+            self.assertEqual(det.engine_name(), "heuristique")
+            self.assertIn("nms", det.engine_reason() or "")
+            self.assertGreaterEqual(len(found), 1)
+        finally:
+            det._yolo_detector = prev_det
+            det._yolo_tried = prev_tried
+            det._engine_reason = prev_reason
 
 
 class ApiTests(unittest.TestCase):
@@ -87,7 +184,7 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["version"], "1.5.1")
+        self.assertEqual(body["version"], "1.6.0")
         self.assertIn(body["engine"], ("yolo", "heuristique"))
 
     def test_analyse_exige_le_jeton(self):
@@ -118,6 +215,27 @@ class SpecTests(unittest.TestCase):
         self.assertIn("ultralytics", text)
         self.assertIn('"cv2"', text)
         self.assertIn("collect_all", text)
+        self.assertIn("certifi", text)
+        self.assertIn("collect_data_files", text)
+        self.assertIn("solar_detector.pt", text)
+        self.assertIn("torchvision", text)
+        self.assertIn("collect_dynamic_libs", text)
+        self.assertIn("_C_stable", text)
+        self.assertIn("pyi_rth_torchvision_ops", text)
+
+
+
+class SslTests(unittest.TestCase):
+    def test_contexte_utilise_certifi_et_verifie(self):
+        import ssl
+
+        import certifi
+
+        ctx = ssl_context()
+        self.assertTrue(ctx.check_hostname)
+        self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(Path(certifi.where()).is_file())
+        self.assertGreater(len(ctx.get_ca_certs()), 0)
 
 
 if __name__ == "__main__":

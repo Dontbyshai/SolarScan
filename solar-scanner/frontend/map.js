@@ -7,8 +7,15 @@
 window.MapController = (() => {
   'use strict';
 
+  function iconHtml(name, label) {
+    const svg = '<svg class="icon" aria-hidden="true"><use href="#i-' + name + '"></use></svg>';
+    return label ? svg + ' <span>' + label + '</span>' : svg;
+  }
+
   const AUTO_TRIGGER_ZOOM = 17;
   const DEBOUNCE_MS = 800;
+  // Aligné sur GetCapabilities IGN : ORTHOIMAGERY.ORTHOPHOTOS / PM_0_19.
+  const IGN_NATIVE_MAX_ZOOM = 19;
 
   // ── State ─────────────────────────────────────────────────
   let _map = null;
@@ -63,7 +70,7 @@ window.MapController = (() => {
       {
         attribution: '© IGN Géoplateforme — France uniquement',
         maxZoom: 22,
-        maxNativeZoom: 19,
+        maxNativeZoom: IGN_NATIVE_MAX_ZOOM,
         minZoom: 1,
       }
     );
@@ -175,7 +182,7 @@ window.MapController = (() => {
     async function performSearch() {
       const query = $searchInput.value.trim();
       if (!query) return;
-      $btnSearch.textContent = '⏳';
+      $btnSearch.classList.add('is-loading');
       try {
         const res = await SolarApi.request(`/geocode/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
@@ -188,7 +195,7 @@ window.MapController = (() => {
       } catch (e) {
         window.Toast?.show('Erreur lors de la recherche', 'error');
       } finally {
-        $btnSearch.textContent = '🔍';
+        $btnSearch.classList.remove('is-loading');
       }
     }
     
@@ -310,6 +317,7 @@ window.MapController = (() => {
 
   // ── Get visible tiles ─────────────────────────────────────
   function _getVisibleTiles(zoom) {
+    zoom = Math.min(Math.max(Math.floor(Number(zoom) || 0), 0), IGN_NATIVE_MAX_ZOOM);
     const bounds = _map.getBounds();
 
     const georgraphicBounds = {
@@ -356,8 +364,16 @@ window.MapController = (() => {
       _switchLayer('ign');
     }
 
-    const analyzeZoom = Math.min(zoom + 1, 19); // Prefer zoom+1 for more detail
+    const mapZoom = Math.floor(Number(zoom) || 0);
+    const analyzeZoom = Math.min(mapZoom + 1, IGN_NATIVE_MAX_ZOOM);
     const tiles = _getVisibleTiles(analyzeZoom);
+    if (mapZoom > IGN_NATIVE_MAX_ZOOM && window.Toast) {
+      Toast.show(
+        `Les photos IGN s'arrêtent au zoom ${IGN_NATIVE_MAX_ZOOM}. Analyse à ce niveau.`,
+        'info',
+        4000
+      );
+    }
 
     if (tiles.length === 0) {
       Toast.show('Aucune tuile visible', 'info');
@@ -495,7 +511,7 @@ window.MapController = (() => {
     if (_isEditing) {
       _editHandler.enable();
       $btnModeEdit.classList.add('active');
-      $btnModeEdit.innerHTML = '💾 Sauver';
+      $btnModeEdit.innerHTML = iconHtml('check', 'Sauver');
       $btnModeEdit.classList.remove('btn-ghost');
       $btnModeEdit.classList.add('btn-primary');
       Toast.show('Mode édition actif. Déplacez les points puis cliquez sur Sauver.', 'info');
@@ -507,7 +523,7 @@ window.MapController = (() => {
       _editHandler.disable();
       $btnModeEdit.classList.remove('active', 'btn-primary');
       $btnModeEdit.classList.add('btn-ghost');
-      $btnModeEdit.innerHTML = '✍️ Éditer';
+      $btnModeEdit.innerHTML = iconHtml('pencil', 'Éditer');
     }
   }
 
@@ -629,15 +645,15 @@ window.MapController = (() => {
 
         <div class="popup-actions">
           <button class="btn btn-ghost" onclick="Sidebar.computeEstimate(${d.area_m2})" style="font-size:11px;" disabled>
-            📄 Fiche PDF
+            ${iconHtml('file', 'Fiche PDF')}
           </button>
           <button class="btn btn-ghost" style="font-size:11px;"
             onclick="navigator.clipboard && navigator.clipboard.writeText('${center.lat.toFixed(6)}, ${center.lng.toFixed(6)}'); Toast.show('Coords copiées', 'success')">
-            📋 Coords
+            ${iconHtml('copy', 'Coords')}
           </button>
           <button class="btn btn-ghost" style="font-size:11px; color: #ef4444;"
             onclick="MapController.deleteDetection(${idx})">
-            🗑️ Supprimer
+            ${iconHtml('trash', 'Supprimer')}
           </button>
         </div>
       </div>`;
