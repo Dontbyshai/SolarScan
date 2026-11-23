@@ -12,3 +12,9 @@ aiosqlite>=0.20.0
 scipy>=1.13.0
 ultralytics>=8.0.0
 huggingface_hub>=0.20.0
+# setuptools 82 a retiré pkg_resources. Sur le CI Mac, pip passe de
+# setuptools 65.5.0 à 84 et laisse un dossier pkg_resources vide.
+# PyInstaller embarque alors le hook pyi_rth_pkgres, qui plante au
+# démarrage du moteur : AttributeError NullProvider.
+# torch exige setuptools>=77.0.3, donc on reste en 77.x–81.x.
+setuptools>=77.0.3,<82
