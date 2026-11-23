@@ -1,6 +1,6 @@
 <div align="center">
   <img src="solar-scanner/assets/logo.png" alt="SolarScan Logo" width="250" />
-  <h1>SolarScan 1.5.1 🛰️☀️</h1>
+  <h1>SolarScan 1.6.0 🛰️☀️</h1>
   <p><strong>Logiciel professionnel de détection de panneaux solaires par imagerie satellite pour la facturation de nettoyage.</strong></p>
 </div>
 
@@ -39,7 +39,7 @@ Les installeurs officiels sont sur la [page des versions](https://github.com/Don
 
 ### Windows
 
-Téléchargez le fichier `.exe` (par exemple `Solar Scanner Setup 1.5.1.exe`), lancez-le, puis ouvrez **Solar Scanner** depuis le menu Démarrer.
+Téléchargez le fichier `.exe` (par exemple `Solar Scanner Setup 1.6.0.exe`), lancez-le, puis ouvrez **Solar Scanner** depuis le menu Démarrer.
 
 ### macOS
 

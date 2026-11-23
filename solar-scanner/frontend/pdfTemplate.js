@@ -315,7 +315,7 @@ window.PDFGenerator = (() => {
       + '<table class="items-table"><thead><tr><th>#</th><th>Client</th><th>Adresse</th><th>Prix HT</th></tr></thead>'
       + '<tbody>' + rows + '</tbody></table>'
       + bilan
-      + '<p class="footer">G\u00e9n\u00e9r\u00e9 par SolarScan 1.5.1</p>'
+      + '<p class="footer">G\u00e9n\u00e9r\u00e9 par SolarScan 1.6.0</p>'
       + '</body></html>';
   }
 

@@ -643,7 +643,7 @@ window.Sidebar = (() => {
     $btnSaveProject.addEventListener('click', async () => {
       if (!_detections.length || !window.solarAPI) return;
       const projectData = {
-        version: '1.5.1',
+        version: '1.6.0',
         date: new Date().toISOString(),
         detections: _detections,
         businessOptions: _businessOptions,

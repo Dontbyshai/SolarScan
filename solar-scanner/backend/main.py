@@ -35,7 +35,7 @@ from tiles import (
     sanitize_tiles,
 )
 
-APP_VERSION = "1.5.1"
+APP_VERSION = "1.6.0"
 GEO_CACHE_MAX = 256
 OSRM_HOST = "router.project-osrm.org"
 
