@@ -27,7 +27,11 @@ logger = logging.getLogger(__name__)
 IGN_DELAY_SECS = 0.1  # 100ms entre requêtes IGN
 MAX_TILES_PER_REQUEST = 80
 MIN_ZOOM = 12
-MAX_ZOOM = 22
+MAX_ZOOM = 22  # zoom carte accepté (Leaflet va jusqu'à 22)
+# GetCapabilities WMTS, couche ORTHOIMAGERY.ORTHOPHOTOS, TileMatrixSet PM_0_19 :
+# le dernier TileMatrix servi est 19. Au-delà, data.geopf.fr répond 404
+# (la carte Leaflet les affiche quand même, en agrandissant le zoom 19).
+IGN_NATIVE_MAX_ZOOM = 19
 ALLOWED_TILE_HOST = "data.geopf.fr"
 
 _db_conn: Optional[sqlite3.Connection] = None
@@ -101,6 +105,14 @@ def get_cache_size_mb() -> float:
         return 0.0
 
 
+def native_tile(x: int, y: int, z: int) -> Tuple[int, int, int]:
+    """Ramène une tuile au zoom IGN disponible (parent x>>d, y>>d)."""
+    if z <= IGN_NATIVE_MAX_ZOOM:
+        return x, y, z
+    delta = z - IGN_NATIVE_MAX_ZOOM
+    return x >> delta, y >> delta, IGN_NATIVE_MAX_ZOOM
+
+
 def sanitize_tiles(tile_infos: List[Dict]) -> List[Dict]:
     """
     Reconstruit chaque tuile à partir de x/y/z uniquement.
@@ -108,6 +120,10 @@ def sanitize_tiles(tile_infos: List[Dict]) -> List[Dict]:
     L'URL envoyée par l'interface est ignorée : le backend ne télécharge
     que la tuile IGN canonique. Ça empêche de faire télécharger une adresse
     arbitraire (fichier interne, autre site, etc.).
+
+    Si le zoom demandé dépasse IGN_NATIVE_MAX_ZOOM (19), on prend la tuile
+    parente à ce zoom, on dédoublonne, et les bounds sont celles des
+    tuiles réellement téléchargées (pour que les polygones tombent juste).
     """
     if len(tile_infos) > MAX_TILES_PER_REQUEST:
         raise ValueError(
@@ -115,6 +131,8 @@ def sanitize_tiles(tile_infos: List[Dict]) -> List[Dict]:
         )
 
     cleaned: List[Dict] = []
+    seen = set()
+    clamped = 0
     for tile in tile_infos:
         try:
             z = int(tile["z"])
@@ -130,6 +148,16 @@ def sanitize_tiles(tile_infos: List[Dict]) -> List[Dict]:
         if not (0 <= x < limit and 0 <= y < limit):
             raise ValueError("Coordonnées de tuile hors grille")
 
+        orig_z = z
+        x, y, z = native_tile(x, y, z)
+        if z != orig_z:
+            clamped += 1
+
+        key = (x, y, z)
+        if key in seen:
+            continue
+        seen.add(key)
+
         url = ign_tile_url(x, y, z)
         if ALLOWED_TILE_HOST not in url:
             raise ValueError("Hôte de tuile non autorisé")
@@ -141,6 +169,14 @@ def sanitize_tiles(tile_infos: List[Dict]) -> List[Dict]:
             "url": url,
             "bounds": tile_to_bounds(x, y, z),
         })
+
+    if clamped:
+        logger.info(
+            "Zoom IGN limité à %s : %s tuile(s) ramenée(s), %s tuile(s) unique(s) à télécharger",
+            IGN_NATIVE_MAX_ZOOM,
+            clamped,
+            len(cleaned),
+        )
     return cleaned
 
 
@@ -153,24 +189,25 @@ HEADERS = {
 }
 
 
-async def download_tile(session: aiohttp.ClientSession, url: str) -> Optional[bytes]:
-    """Télécharge une tuile IGN (avec cache)."""
+async def download_tile(
+    session: aiohttp.ClientSession, url: str
+) -> Tuple[Optional[bytes], Optional[str]]:
+    """Télécharge une tuile IGN (avec cache). Retourne (données, erreur)."""
     cached = get_cached_tile(url)
     if cached:
-        return cached
+        return cached, None
 
     try:
         async with session.get(url, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status == 200:
                 data = await resp.read()
                 set_cached_tile(url, data)
-                return data
-            else:
-                logger.warning(f"Tile {url} returned HTTP {resp.status}")
-                return None
+                return data, None
+            logger.warning("Tuile %s : HTTP %s", url, resp.status)
+            return None, f"HTTP {resp.status}"
     except asyncio.TimeoutError:
         logger.warning("Délai dépassé pour la tuile %s", url)
-        return None
+        return None, "Délai dépassé"
     except Exception as e:
         logger.error(
             "Erreur de téléchargement de tuile %s : %s: %s",
@@ -179,18 +216,20 @@ async def download_tile(session: aiohttp.ClientSession, url: str) -> Optional[by
             e,
             exc_info=True,
         )
-        return None
+        return None, f"{type(e).__name__}: {e}"
 
 
 async def download_tiles_batch(
     tile_infos: List[Dict],
     progress_callback=None
-) -> Dict[str, bytes]:
+) -> Tuple[Dict[str, bytes], List[str]]:
     """
-    Télécharge une liste de tuiles avec délai IGN et retourne {url: bytes}.
+    Télécharge une liste de tuiles avec délai IGN.
+    Retourne ({url: bytes}, liste d'erreurs).
     tile_infos: [{"url": "...", "x": int, "y": int, "z": int, "bounds": {...}}]
     """
     results: Dict[str, bytes] = {}
+    errors: List[str] = []
     total = len(tile_infos)
 
     # SSL vérifié avec le bundle certifi (voir http_ssl.py).
@@ -199,9 +238,11 @@ async def download_tiles_batch(
             url = tile["url"]
             logger.debug(f"Downloading tile {i+1}/{total}: {url}")
 
-            data = await download_tile(session, url)
+            data, err = await download_tile(session, url)
             if data:
                 results[url] = data
+            elif err:
+                errors.append(err)
 
             if progress_callback:
                 pct = (i + 1) / total * 50  # 0-50% = download phase
@@ -211,7 +252,34 @@ async def download_tiles_batch(
             if i < total - 1:
                 await asyncio.sleep(IGN_DELAY_SECS)
 
-    return results
+    return results, errors
+
+
+def download_failure_message(errors: List[str]) -> str:
+    """Message d'erreur compréhensible, sans accuser Internet à tort."""
+    if not errors:
+        return "Impossible de télécharger les tuiles IGN."
+    joined = " | ".join(errors)
+    all_404 = all(e.startswith("HTTP 404") for e in errors)
+    any_404 = any(e.startswith("HTTP 404") for e in errors)
+    if all_404:
+        return (
+            f"Les photos IGN ne sont pas disponibles à ce zoom "
+            f"(maximum {IGN_NATIVE_MAX_ZOOM}). Relancez le scan."
+        )
+    if any(e.startswith("Délai") for e in errors):
+        return "Délai dépassé lors du téléchargement des tuiles IGN."
+    lower = joined.lower()
+    if any(s in lower for s in ("ssl", "certificate", "certificat")):
+        return f"Erreur de certificat HTTPS en téléchargeant les tuiles IGN ({errors[0]})."
+    if any_404:
+        return (
+            f"Certaines tuiles IGN sont introuvables (erreur 404). "
+            f"Le zoom demandé dépasse peut-être le maximum ({IGN_NATIVE_MAX_ZOOM})."
+        )
+    if any(e.startswith("HTTP ") for e in errors):
+        return f"Le serveur IGN a refusé des tuiles ({errors[0]})."
+    return f"Impossible de télécharger les tuiles IGN ({errors[0]})."
 
 
 # ── Tile Assembly ──────────────────────────────────────────────────────────────

@@ -29,6 +29,7 @@ from paths import data_dir, log_path, settings_path
 from tiles import (
     assemble_tiles,
     clear_tile_cache,
+    download_failure_message,
     download_tiles_batch,
     get_cache_size_mb,
     sanitize_tiles,
@@ -224,7 +225,7 @@ async def analyze(request: AnalyzeRequest):
     logger.info(f"Analyse : {len(tiles_data)} tuiles, zoom={tiles_data[0]['z']}")
 
     try:
-        downloaded = await download_tiles_batch(tiles_data)
+        downloaded, download_errors = await download_tiles_batch(tiles_data)
     except Exception as exc:
         logger.error(
             "Erreur de téléchargement des tuiles IGN : %s: %s",
@@ -238,14 +239,14 @@ async def analyze(request: AnalyzeRequest):
     logger.info(f"Tuiles reçues : {len(downloaded)}/{len(tiles_data)} ({tiles_failed} en échec)")
 
     if not downloaded:
+        detail = download_failure_message(download_errors)
         logger.error(
-            "Aucune tuile IGN reçue (%s demandées). Voir les erreurs de téléchargement ci-dessus.",
+            "Aucune tuile IGN reçue (%s demandées). %s Erreurs : %s",
             len(tiles_data),
+            detail,
+            " | ".join(download_errors) if download_errors else "(aucune)",
         )
-        raise HTTPException(
-            status_code=502,
-            detail="Impossible de télécharger les tuiles IGN. Vérifiez votre connexion internet.",
-        )
+        raise HTTPException(status_code=502, detail=detail)
 
     zoom = tiles_data[0]["z"]
     assembled = assemble_tiles(tiles_data, downloaded, zoom)

@@ -9,6 +9,8 @@ window.MapController = (() => {
 
   const AUTO_TRIGGER_ZOOM = 17;
   const DEBOUNCE_MS = 800;
+  // Aligné sur GetCapabilities IGN : ORTHOIMAGERY.ORTHOPHOTOS / PM_0_19.
+  const IGN_NATIVE_MAX_ZOOM = 19;
 
   // ── State ─────────────────────────────────────────────────
   let _map = null;
@@ -63,7 +65,7 @@ window.MapController = (() => {
       {
         attribution: '© IGN Géoplateforme — France uniquement',
         maxZoom: 22,
-        maxNativeZoom: 19,
+        maxNativeZoom: IGN_NATIVE_MAX_ZOOM,
         minZoom: 1,
       }
     );
@@ -310,6 +312,7 @@ window.MapController = (() => {
 
   // ── Get visible tiles ─────────────────────────────────────
   function _getVisibleTiles(zoom) {
+    zoom = Math.min(Math.max(Math.floor(Number(zoom) || 0), 0), IGN_NATIVE_MAX_ZOOM);
     const bounds = _map.getBounds();
 
     const georgraphicBounds = {
@@ -356,8 +359,16 @@ window.MapController = (() => {
       _switchLayer('ign');
     }
 
-    const analyzeZoom = Math.min(zoom + 1, 19); // Prefer zoom+1 for more detail
+    const mapZoom = Math.floor(Number(zoom) || 0);
+    const analyzeZoom = Math.min(mapZoom + 1, IGN_NATIVE_MAX_ZOOM);
     const tiles = _getVisibleTiles(analyzeZoom);
+    if (mapZoom > IGN_NATIVE_MAX_ZOOM && window.Toast) {
+      Toast.show(
+        `Les photos IGN s'arrêtent au zoom ${IGN_NATIVE_MAX_ZOOM}. Analyse à ce niveau.`,
+        'info',
+        4000
+      );
+    }
 
     if (tiles.length === 0) {
       Toast.show('Aucune tuile visible', 'info');
